@@ -16,8 +16,9 @@ import (
 )
 
 type ValidatorProxy struct {
-	hostIP net.IP
-	port   int
+	host       string
+	externalIP string
+	port       int
 
 	id     int
 	target *url.URL
@@ -31,15 +32,17 @@ type ResponseCallback func(request *http.Request, response []byte) error
 func NewProxy(
 	ctx context.Context,
 	id int,
-	hostIP net.IP,
+	host string,
+	externalIP net.IP,
 	port int,
 	destination string,
 	responseCallbacks map[string]ResponseCallback,
 ) (*ValidatorProxy, error) {
 
 	proxy := &ValidatorProxy{
-		hostIP: hostIP,
-		port:   port,
+		host:       host,
+		externalIP: externalIP.String(),
+		port:       port,
 	}
 
 	router := mux.NewRouter()
@@ -58,7 +61,7 @@ func NewProxy(
 
 	proxy.srv = &http.Server{
 		Handler: router,
-		Addr:    fmt.Sprintf("%s:%d", hostIP, port),
+		Addr:    fmt.Sprintf("%s:%d", host, port),
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -76,8 +79,8 @@ func (p *ValidatorProxy) ID() int {
 	return p.id
 }
 
-func (p *ValidatorProxy) HostIP() net.IP {
-	return p.hostIP
+func (p *ValidatorProxy) ExternalIP() string {
+	return p.externalIP
 }
 
 func (p *ValidatorProxy) Port() int {
@@ -85,7 +88,7 @@ func (p *ValidatorProxy) Port() int {
 }
 
 func (p *ValidatorProxy) Address() string {
-	return fmt.Sprintf("%s:%d", p.hostIP, p.port)
+	return fmt.Sprintf("http://%s:%d", p.host, p.port)
 }
 
 func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallback) func(http.ResponseWriter, *http.Request) {

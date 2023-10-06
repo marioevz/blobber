@@ -23,13 +23,13 @@ func TestResponseParse(T *testing.T) {
 		T.Fatalf("wrong version: %s, expected deneb", version)
 	}
 
-	if len(blockBlobResponse.BlobSidecars) != 6 {
-		T.Fatalf("wrong number of sidecars: %d, expected 5", len(blockBlobResponse.BlobSidecars))
+	if len(blockBlobResponse.Blobs) != 6 {
+		T.Fatalf("wrong number of sidecars: %d, expected 5", len(blockBlobResponse.Blobs))
 	}
 
 	expectedBlockRoot := common.HexToHash("0x37977b8edac80973deb38f3888bff9483b45b057c188ec041273cfe4485e2695")
 
-	blockRoot := blockBlobResponse.BlobSidecars[0].BlockRoot
+	blockRoot := blockBlobResponse.Blobs[0].BlockRoot
 	if !bytes.Equal(expectedBlockRoot[:], blockRoot[:]) {
 		T.Fatalf("wrong block root: %x, expected %x", blockRoot[:], expectedBlockRoot[:])
 	}
