@@ -1,14 +1,15 @@
 package p2p
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"math/big"
 	"net"
 	"sync"
+	"time"
 
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p/enode"
@@ -22,12 +23,14 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 
 	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p/encoder"
 	"github.com/prysmaticlabs/prysm/v4/consensus-types/primitives"
+	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 )
 
 var sszNetworkEncoder = encoder.SszNetworkEncoder{}
@@ -56,6 +59,7 @@ type TestP2P struct {
 	Digest     [4]byte
 	MetaData   MetaData
 
+	ctx    context.Context
 	cancel context.CancelFunc
 	state  *ChainState
 	// BeaconAPITest *BeaconAPITest
@@ -102,8 +106,6 @@ func ConvertFromInterfacePrivKey(privkey crypto.PrivKey) (*ecdsa.PrivateKey, err
 }
 
 func NewTestP2P(ctx context.Context /*beaconAPITest *BeaconAPITest,*/, ip net.IP, port int64, chainState *ChainState) (*TestP2P, error) {
-	ctx, cancel := context.WithCancel(ctx)
-
 	// Generate a new private key pair for this host.
 	priv, pub, err := crypto.GenerateSecp256k1Key(rand.Reader)
 	if err != nil {
@@ -142,6 +144,7 @@ func NewTestP2P(ctx context.Context /*beaconAPITest *BeaconAPITest,*/, ip net.IP
 		return nil, err
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
 	return &TestP2P{
 		Host:       h,
 		PubSub:     ps,
@@ -153,7 +156,9 @@ func NewTestP2P(ctx context.Context /*beaconAPITest *BeaconAPITest,*/, ip net.IP
 			AttNets:   make([]byte, 8),
 		},
 
-		state:  chainState,
+		state: chainState,
+
+		ctx:    ctx,
 		cancel: cancel,
 		// BeaconAPITest: beaconAPITest,
 	}, nil
@@ -309,4 +314,64 @@ func (p *TestP2P) SetupStreams() error {
 	})
 
 	return nil
+}
+
+func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, opts ...pubsub.PubOpt) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			if len(topicHandle.ListPeers()) > 0 {
+				return topicHandle.Publish(ctx, data, opts...)
+			}
+		}
+	}
+}
+
+func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
+	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
+	defer cancel()
+	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
+		return errors.Wrap(err, "failed to wait for p2p connection")
+	}
+
+	buf := new(bytes.Buffer)
+	if _, err := sszNetworkEncoder.EncodeGossip(buf, signedBeaconBlockDeneb); err != nil {
+		return errors.Wrap(err, "failed to encode signed blob sidecar")
+	}
+	topicHandle, err := p.PubSub.Join(signedBeaconBlockToTopic([4]byte{}, sszNetworkEncoder.ProtocolSuffix()))
+	if err != nil {
+		return errors.Wrap(err, "failed to join topic")
+	}
+
+	return PublishTopic(timeoutCtx, topicHandle, buf.Bytes())
+}
+
+func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar) error {
+	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
+	defer cancel()
+	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
+		return errors.Wrap(err, "failed to wait for p2p connection")
+	}
+	subnet := signedBlobSidecar.Message.Index
+
+	buf := new(bytes.Buffer)
+	if _, err := sszNetworkEncoder.EncodeGossip(buf, signedBlobSidecar); err != nil {
+		return errors.Wrap(err, "failed to encode signed blob sidecar")
+	}
+	topicHandle, err := p.PubSub.Join(blobSubnetToTopic(subnet, [4]byte{}, sszNetworkEncoder.ProtocolSuffix()))
+	if err != nil {
+		return errors.Wrap(err, "failed to join topic")
+	}
+
+	return PublishTopic(timeoutCtx, topicHandle, buf.Bytes())
+}
+
+func signedBeaconBlockToTopic(forkDigest [4]byte, protocolSuffix string) string {
+	return fmt.Sprintf("/eth2/%x/blob_sidecar", forkDigest) + protocolSuffix
+}
+
+func blobSubnetToTopic(subnet uint64, forkDigest [4]byte, protocolSuffix string) string {
+	return fmt.Sprintf("/eth2/%x/blob_sidecar_%d", forkDigest, subnet) + protocolSuffix
 }
