@@ -7,17 +7,19 @@ import (
 
 	"github.com/marioevz/eth-clients/clients/validator"
 	beacon "github.com/protolambda/zrnt/eth2/beacon/common"
+	"github.com/protolambda/ztyp/tree"
 )
 
 type config struct {
-	id                int
-	port              int
-	proxiesPortStart  int
-	host              string
-	spec              *beacon.Spec
-	externalIP        net.IP
-	beaconGenesisTime beacon.Timestamp
-	validatorKeys     map[beacon.ValidatorIndex]*validator.ValidatorKeys
+	id                    int
+	port                  int
+	proxiesPortStart      int
+	host                  string
+	spec                  *beacon.Spec
+	externalIP            net.IP
+	beaconGenesisTime     beacon.Timestamp
+	genesisValidatorsRoot tree.Root
+	validatorKeys         map[beacon.ValidatorIndex]*validator.ValidatorKeys
 
 	mutex sync.Mutex
 }
@@ -112,6 +114,18 @@ func WithBeaconGenesisTime(t beacon.Timestamp) Option {
 			return nil
 		},
 		description: fmt.Sprintf("WithBeaconGenesisTime(%d)", t),
+	}
+}
+
+func WithGenesisValidatorsRoot(t tree.Root) Option {
+	return Option{
+		apply: func(b *Blobber) error {
+			b.cfg.mutex.Lock()
+			defer b.cfg.mutex.Unlock()
+			b.cfg.genesisValidatorsRoot = t
+			return nil
+		},
+		description: fmt.Sprintf("WithGenesisValidatorsRoot(0x%x)", t),
 	}
 }
 

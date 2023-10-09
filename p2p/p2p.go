@@ -1,15 +1,15 @@
 package p2p
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"fmt"
 	"math/big"
 	"net"
-	"sync"
 	"time"
+
+	"github.com/marioevz/blobber/common"
 
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p/enode"
@@ -19,36 +19,31 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/muxer/mplex"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/pkg/errors"
+	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"github.com/sirupsen/logrus"
-
-	"github.com/protolambda/zrnt/eth2/beacon/common"
 
 	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p/encoder"
 	"github.com/prysmaticlabs/prysm/v4/consensus-types/primitives"
-	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 )
 
 var sszNetworkEncoder = encoder.SszNetworkEncoder{}
 
 type Goodbye = primitives.SSZUint64
-
 type PingData = primitives.SSZUint64
 
-type ChainState struct {
-	CurrentForkVersion  common.Version
-	CurrentForkDigest   common.ForkDigest
-	FinalizedCheckpoint common.Checkpoint
-	CurrentHead         common.Checkpoint
-	CurrentSlot         common.Slot
+const (
+	StatusProtocolID   = "/eth2/beacon_chain/req/status/1/" + encoder.ProtocolSuffixSSZSnappy
+	GoodbyeProtocolID  = "/eth2/beacon_chain/req/goodbye/1/" + encoder.ProtocolSuffixSSZSnappy
+	PingProtocolID     = "/eth2/beacon_chain/req/ping/1/" + encoder.ProtocolSuffixSSZSnappy
+	MetaDataProtocolID = "/eth2/beacon_chain/req/metadata/2/" + encoder.ProtocolSuffixSSZSnappy
+)
 
-	sync.Mutex
-	// MetaData            MetaData
-}
+const pubsubQueueSize = 600
 
 type TestP2P struct {
 	Host       host.Host
@@ -56,13 +51,11 @@ type TestP2P struct {
 	PrivateKey crypto.PrivKey
 	PublicKey  crypto.PubKey
 	LocalNode  *enode.LocalNode
-	Digest     [4]byte
-	MetaData   MetaData
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	state  *ChainState
-	// BeaconAPITest *BeaconAPITest
+	ctx      context.Context
+	cancel   context.CancelFunc
+	MetaData *eth.MetaDataV1
+	state    *common.Status
 }
 
 func createLocalNode(
@@ -105,7 +98,11 @@ func ConvertFromInterfacePrivKey(privkey crypto.PrivKey) (*ecdsa.PrivateKey, err
 	return privKey, nil
 }
 
-func NewTestP2P(ctx context.Context /*beaconAPITest *BeaconAPITest,*/, ip net.IP, port int64, chainState *ChainState) (*TestP2P, error) {
+func NewTestP2P(ctx context.Context, ip net.IP, port int64, chainState *common.Status) (*TestP2P, error) {
+	if chainState == nil {
+		return nil, errors.New("chain state cannot be nil")
+	}
+
 	// Generate a new private key pair for this host.
 	priv, pub, err := crypto.GenerateSecp256k1Key(rand.Reader)
 	if err != nil {
@@ -115,7 +112,7 @@ func NewTestP2P(ctx context.Context /*beaconAPITest *BeaconAPITest,*/, ip net.IP
 	libp2pOptions := []libp2p.Option{
 		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/%d", ip.String(), port)), libp2p.UserAgent("HiveSim/0.1.0"),
 		libp2p.Transport(tcp.NewTCPTransport),
-		libp2p.Muxer("/mplex/6.7.0", yamux.DefaultTransport),
+		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 		libp2p.DefaultMuxers,
 		libp2p.Security(noise.ID, noise.New),
 		libp2p.Ping(false),
@@ -127,9 +124,12 @@ func NewTestP2P(ctx context.Context /*beaconAPITest *BeaconAPITest,*/, ip net.IP
 		return nil, err
 	}
 
-	ps, err := pubsub.NewGossipSub(ctx, h,
-		pubsub.WithMessageSigning(false),
-		pubsub.WithStrictSignatureVerification(false),
+	ps, err := pubsub.NewGossipSub(context.Background(), h,
+		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
+		pubsub.WithNoAuthor(),
+		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
+		pubsub.WithValidateQueueSize(pubsubQueueSize),
+		pubsub.WithMaxMessageSize(10*1<<20), // 10 MiB
 	)
 	if err != nil {
 		return nil, err
@@ -145,24 +145,81 @@ func NewTestP2P(ctx context.Context /*beaconAPITest *BeaconAPITest,*/, ip net.IP
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	return &TestP2P{
+	testP2P := &TestP2P{
 		Host:       h,
 		PubSub:     ps,
 		PrivateKey: priv,
 		PublicKey:  pub,
 		LocalNode:  localNode,
-		MetaData: MetaData{
+		MetaData: &eth.MetaDataV1{
 			SeqNumber: 0,
-			AttNets:   make([]byte, 8),
+			Attnets:   make([]byte, 8),
+			Syncnets:  make([]byte, 1),
 		},
 
 		state: chainState,
 
 		ctx:    ctx,
 		cancel: cancel,
-		// BeaconAPITest: beaconAPITest,
-	}, nil
+	}
+	if err := testP2P.SetupStreams(); err != nil {
+		testP2P.Close()
+		return nil, err
+	}
+	return testP2P, nil
+}
 
+func (p *TestP2P) Connect(ctx context.Context, peer *BeaconClientPeer) error {
+	peerAddrInfo, err := peer.GetPeerAddrInfo(ctx)
+	if err != nil {
+		return errors.Wrap(err, "could not get peer address info")
+	}
+	if err := p.Host.Connect(p.ctx, *peerAddrInfo); err != nil {
+		return errors.Wrap(err, "could not connect to peer")
+	}
+
+	p.Host.Peerstore().AddProtocols(peerAddrInfo.ID, StatusProtocolID, GoodbyeProtocolID, PingProtocolID, MetaDataProtocolID)
+
+	if err := p.SendInitialStatus(ctx, peerAddrInfo.ID); err != nil {
+		return errors.Wrap(err, "could not send initial status")
+	}
+	return nil
+}
+
+func (p *TestP2P) SendInitialStatus(ctx context.Context, peer peer.ID) error {
+	// Open stream
+	peerInfo := p.Host.Peerstore().PeerInfo(peer)
+	logrus.WithFields(logrus.Fields{
+		"peer": peerInfo.ID.String(),
+	}).Debug("Opening stream")
+	s, err := p.Host.NewStream(ctx, peer, StatusProtocolID)
+	if err != nil {
+		return errors.Wrap(err, "failed to open stream")
+	}
+
+	// Log sent request
+	p.state.Lock()
+	defer p.state.Unlock()
+	logrus.WithFields(logrus.Fields{
+		"protocol":        s.Protocol(),
+		"peer":            s.Conn().RemotePeer().String(),
+		"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
+		"finalized_root":  fmt.Sprintf("%x", p.state.FinalizedRoot),
+		"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
+		"head_root":       fmt.Sprintf("%x", p.state.HeadRoot),
+		"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
+	}).Debug("Sending initial status")
+
+	// Send request
+	if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, p.state); err != nil {
+		return errors.Wrap(err, "failed to encode outgoing message")
+	}
+	// Done sending request
+	if err := s.CloseWrite(); err != nil {
+		return errors.Wrap(err, "failed to close+write")
+	}
+
+	return nil
 }
 
 func (p *TestP2P) Close() error {
@@ -171,21 +228,25 @@ func (p *TestP2P) Close() error {
 }
 
 func (p *TestP2P) WaitForP2PConnection(ctx context.Context) error {
-	// TODO: Actually wait for connection
-	if len(p.Host.Network().Peers()) > 0 {
-		return nil
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Millisecond):
+			if len(p.Host.Network().Peers()) > 0 {
+				return nil
+			}
+		}
 	}
-	return errors.New("no peers connected")
 }
 
 func (p *TestP2P) SetupStreams() error {
 	// Prepare stream responses for the basic Req/Resp protocols.
 
 	// Status
-	protocolID := protocol.ID("/eth2/beacon_chain/req/status/1/" + encoder.ProtocolSuffixSSZSnappy)
-	p.Host.SetStreamHandler(protocolID, func(s network.Stream) {
+	p.Host.SetStreamHandler(StatusProtocolID, func(s network.Stream) {
 		// Read the incoming message into the appropriate struct.
-		var out Status
+		var out common.Status
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &out); err != nil {
 			logrus.WithError(err).Error("Failed to decode incoming message")
 			return
@@ -199,40 +260,33 @@ func (p *TestP2P) SetupStreams() error {
 			"finalized_epoch": fmt.Sprintf("%d", out.FinalizedEpoch),
 			"head_root":       fmt.Sprintf("%x", out.HeadRoot),
 			"head_slot":       fmt.Sprintf("%d", out.HeadSlot),
-		}).Info("Received data")
+		}).Debug("Received data")
 
 		// Construct response
 		p.state.Lock()
-		resp := Status{
-			ForkDigest:     p.state.CurrentForkDigest[:],
-			FinalizedRoot:  p.state.FinalizedCheckpoint.Root[:],
-			FinalizedEpoch: uint64(p.state.FinalizedCheckpoint.Epoch),
-			HeadRoot:       p.state.CurrentHead.Root[:],
-			HeadSlot:       uint64(p.state.CurrentSlot),
-		}
-		p.state.Unlock()
+		defer p.state.Unlock()
 
 		// Log received data
 		logrus.WithFields(logrus.Fields{
 			"protocol":        s.Protocol(),
 			"peer":            s.Conn().RemotePeer().String(),
-			"fork_digest":     fmt.Sprintf("%x", resp.ForkDigest),
-			"finalized_root":  fmt.Sprintf("%x", resp.FinalizedRoot),
-			"finalized_epoch": fmt.Sprintf("%d", resp.FinalizedEpoch),
-			"head_root":       fmt.Sprintf("%x", resp.HeadRoot),
-			"head_slot":       fmt.Sprintf("%d", resp.HeadSlot),
-		}).Info("Response data")
+			"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
+			"finalized_root":  fmt.Sprintf("%x", p.state.FinalizedRoot),
+			"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
+			"head_root":       fmt.Sprintf("%x", p.state.HeadRoot),
+			"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
+		}).Debug("Response data")
 
 		// Send response
 		if _, err := s.Write([]byte{0x00}); err != nil {
 			logrus.WithError(err).Error("Failed to send status response")
 			return
 		}
-		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, &resp); err != nil {
+		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, p.state); err != nil {
 			logrus.WithError(err).Error("Failed to encode outgoing message")
 			return
 		} else {
-			logrus.WithField("bytes", n).Info("Sent data")
+			logrus.WithField("bytes", n).Debug("Sent data")
 		}
 		if err := s.Close(); err != nil {
 			logrus.WithError(err).Error("Failed to close stream")
@@ -241,8 +295,7 @@ func (p *TestP2P) SetupStreams() error {
 	})
 
 	// Goodbye
-	protocolID = protocol.ID("/eth2/beacon_chain/req/goodbye/1/" + encoder.ProtocolSuffixSSZSnappy)
-	p.Host.SetStreamHandler(protocolID, func(s network.Stream) {
+	p.Host.SetStreamHandler(GoodbyeProtocolID, func(s network.Stream) {
 		// Read the incoming message into the appropriate struct.
 		var out Goodbye
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &out); err != nil {
@@ -254,7 +307,7 @@ func (p *TestP2P) SetupStreams() error {
 			"protocol": s.Protocol(),
 			"peer":     s.Conn().RemotePeer().String(),
 			"reason":   fmt.Sprintf("%d", out),
-		}).Info("Received data")
+		}).Debug("Received data")
 
 		// Construct response
 		var resp Goodbye
@@ -276,12 +329,11 @@ func (p *TestP2P) SetupStreams() error {
 	})
 
 	// Ping
-	protocolID = protocol.ID("/eth2/beacon_chain/req/ping/1/" + encoder.ProtocolSuffixSSZSnappy)
-	p.Host.SetStreamHandler(protocolID, func(s network.Stream) {
+	p.Host.SetStreamHandler(PingProtocolID, func(s network.Stream) {
 		logrus.WithFields(logrus.Fields{
 			"protocol": s.Protocol(),
 			"peer":     s.Conn().RemotePeer().String(),
-		}).Info("Got a new stream")
+		}).Debug("Got a new stream")
 		// Read the incoming message into the appropriate struct.
 		var out PingData
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &out); err != nil {
@@ -293,7 +345,7 @@ func (p *TestP2P) SetupStreams() error {
 			"protocol":  s.Protocol(),
 			"peer":      s.Conn().RemotePeer().String(),
 			"ping_data": fmt.Sprintf("%d", out),
-		}).Info("Received data")
+		}).Debug("Received data")
 
 		// Construct response
 		resp := PingData(p.MetaData.SeqNumber)
@@ -313,65 +365,37 @@ func (p *TestP2P) SetupStreams() error {
 		}
 	})
 
-	return nil
-}
+	// MetaData
+	p.Host.SetStreamHandler(MetaDataProtocolID, func(s network.Stream) {
+		logrus.WithFields(logrus.Fields{
+			"protocol": s.Protocol(),
+			"peer":     s.Conn().RemotePeer().String(),
+		}).Debug("Got a new stream")
 
-func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, opts ...pubsub.PubOpt) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-			if len(topicHandle.ListPeers()) > 0 {
-				return topicHandle.Publish(ctx, data, opts...)
-			}
+		// Construct response
+		resp := p.MetaData
+		// Send response
+		totalBytesWritten := 0
+		if n, err := s.Write([]byte{0x00}); err != nil {
+			logrus.WithError(err).Error("Failed to send status response")
+			return
+		} else {
+			totalBytesWritten += n
 		}
-	}
-}
+		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, resp); err != nil {
+			logrus.WithError(err).Error("Failed to encode outgoing message")
+			return
+		} else {
+			totalBytesWritten += n
+		}
 
-func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
-	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
-	defer cancel()
-	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
-		return errors.Wrap(err, "failed to wait for p2p connection")
-	}
+		logrus.WithField("bytes", totalBytesWritten).Debug("Sent data")
 
-	buf := new(bytes.Buffer)
-	if _, err := sszNetworkEncoder.EncodeGossip(buf, signedBeaconBlockDeneb); err != nil {
-		return errors.Wrap(err, "failed to encode signed blob sidecar")
-	}
-	topicHandle, err := p.PubSub.Join(signedBeaconBlockToTopic([4]byte{}, sszNetworkEncoder.ProtocolSuffix()))
-	if err != nil {
-		return errors.Wrap(err, "failed to join topic")
-	}
+		if err := s.Close(); err != nil {
+			logrus.WithError(err).Error("Failed to close stream")
+			return
+		}
+	})
 
-	return PublishTopic(timeoutCtx, topicHandle, buf.Bytes())
-}
-
-func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar) error {
-	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
-	defer cancel()
-	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
-		return errors.Wrap(err, "failed to wait for p2p connection")
-	}
-	subnet := signedBlobSidecar.Message.Index
-
-	buf := new(bytes.Buffer)
-	if _, err := sszNetworkEncoder.EncodeGossip(buf, signedBlobSidecar); err != nil {
-		return errors.Wrap(err, "failed to encode signed blob sidecar")
-	}
-	topicHandle, err := p.PubSub.Join(blobSubnetToTopic(subnet, [4]byte{}, sszNetworkEncoder.ProtocolSuffix()))
-	if err != nil {
-		return errors.Wrap(err, "failed to join topic")
-	}
-
-	return PublishTopic(timeoutCtx, topicHandle, buf.Bytes())
-}
-
-func signedBeaconBlockToTopic(forkDigest [4]byte, protocolSuffix string) string {
-	return fmt.Sprintf("/eth2/%x/blob_sidecar", forkDigest) + protocolSuffix
-}
-
-func blobSubnetToTopic(subnet uint64, forkDigest [4]byte, protocolSuffix string) string {
-	return fmt.Sprintf("/eth2/%x/blob_sidecar_%d", forkDigest, subnet) + protocolSuffix
+	return nil
 }
