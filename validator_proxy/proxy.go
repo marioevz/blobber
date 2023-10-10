@@ -27,7 +27,7 @@ type ValidatorProxy struct {
 	cancel context.CancelFunc
 }
 
-type ResponseCallback func(request *http.Request, response []byte) error
+type ResponseCallback func(request *http.Request, response []byte) (bool, error)
 
 func NewProxy(
 	ctx context.Context,
@@ -157,9 +157,14 @@ func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallb
 			return
 		}
 
-		if err = callback(r, modifiedResp); err != nil {
-			logrus.WithError(err).Error("Could not do client proxy")
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if override, err := callback(r, modifiedResp); err != nil {
+			logrus.WithError(err).Error("Could not execute callback, returning response to validator client")
+		} else if override {
+			logrus.WithFields(logrus.Fields{
+				"method": r.Method,
+				"url":    r.URL.String(),
+			}).Debug("Overriding response")
+			http.Error(w, "overriding response", http.StatusInternalServerError)
 			return
 		}
 

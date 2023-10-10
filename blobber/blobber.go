@@ -179,24 +179,24 @@ func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 	return nil
 }
 
-func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *validator.ValidatorKeys) error {
+func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *validator.ValidatorKeys) (bool, error) {
 
 	// Sign block and blobs
 	signedBlock, err := b.SignBlock(blResponse.Block, proposerKey)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to sign block")
-		return nil
+		return false, errors.Wrap(err, "failed to sign block")
 	}
 	signedBlobs, err := b.SignBlobs(blResponse.Blobs, proposerKey)
 	if err != nil {
 		logrus.WithError(err).Error("failed to sign blobs")
-		return nil
+		return false, errors.Wrap(err, "failed to sign blobs")
 	}
 
 	blockRoot, err := blResponse.Block.HashTreeRoot()
 	if err != nil {
 		logrus.WithError(err).Error("Failed to get block hash tree root")
-		return nil
+		return false, errors.Wrap(err, "failed to get block hash tree root")
 	}
 	logrus.WithFields(logrus.Fields{
 		"slot":              blResponse.Block.Slot,
@@ -211,7 +211,7 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	testP2P, err := p2p.NewTestP2P(b.ctx, b.cfg.externalIP, int64(PortBeaconTCP), b.chainStatus)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to create p2p")
-		return nil
+		return false, errors.Wrap(err, "failed to create p2p")
 	}
 	defer testP2P.Close()
 	logrus.WithFields(logrus.Fields{
@@ -222,7 +222,7 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	for _, cl := range b.cls {
 		if err := testP2P.Connect(b.ctx, cl); err != nil {
 			logrus.WithError(err).Error("Failed to connect to beacon node")
-			return nil
+			return false, errors.Wrap(err, "failed to connect to beacon node")
 		}
 	}
 
@@ -230,17 +230,17 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	for _, signedBlob := range signedBlobs {
 		if err := testP2P.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
 			logrus.WithError(err).Error("Failed to broadcast signed blob sidecar")
-			return nil
+			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 		}
 	}
 
 	// Broadcast the block
 	if err := testP2P.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 		logrus.WithError(err).Error("Failed to broadcast signed beacon block")
-		return nil
+		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
-	return fmt.Errorf("sent blobs through p2p")
+	return true, nil
 }
 
 func (b *Blobber) SignBlock(block *eth.BeaconBlockDeneb, proposerKey *validator.ValidatorKeys) (*eth.SignedBeaconBlockDeneb, error) {
@@ -297,10 +297,10 @@ func (b *Blobber) SignBlobs(blobs []*eth.BlobSidecar, proposerKey *validator.Val
 }
 
 func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id int, version int) validator_proxy.ResponseCallback {
-	return func(request *http.Request, response []byte) error {
+	return func(request *http.Request, response []byte) (bool, error) {
 		var slot beacon_common.Slot
 		if err := slot.UnmarshalJSON([]byte(mux.Vars(request)["slot"])); err != nil {
-			return errors.Wrap(err, "failed to unmarshal slot")
+			return false, errors.Wrap(err, "failed to unmarshal slot")
 		}
 		blockVersion, blockBlobResponse, err := ParseResponse(response)
 		if err != nil {
@@ -310,10 +310,10 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 				"slot":     slot,
 				"response": string(response),
 			}).Debug("Failed to parse response")
-			return errors.Wrap(err, "failed to parse response")
+			return false, errors.Wrap(err, "failed to parse response")
 		}
 		if blockBlobResponse == nil {
-			return nil
+			return false, errors.Wrap(err, "response is nil")
 		}
 		var validatorKey *validator.ValidatorKeys
 		if b.cfg.validatorKeys != nil {
@@ -337,19 +337,19 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 		// Update the chainstate
 		if err := b.updateStatus(cl); err != nil {
 			logrus.WithError(err).Error("Failed to update chain status")
-			return nil
+			return false, errors.Wrap(err, "failed to update chain status")
 		}
 
 		// Execute the slot actions
 		if validatorKey == nil {
 			logrus.Warn("No validator key found, skipping slot actions")
-			return nil
+			return false, errors.Wrap(err, "no validator key found, skipping slot actions")
 		}
-		err = b.executeSlotActions(cl, blockBlobResponse, validatorKey)
+		override, err := b.executeSlotActions(cl, blockBlobResponse, validatorKey)
 		if err != nil {
 			logrus.WithError(err).Error("Failed to execute slot actions")
 		}
-		return err
+		return override, errors.Wrap(err, "failed to execute slot actions")
 	}
 }
 
