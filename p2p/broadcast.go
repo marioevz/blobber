@@ -1,15 +1,25 @@
 package p2p
 
 import (
-	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"time"
 
+	"github.com/golang/snappy"
+
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/pkg/errors"
+	fastssz "github.com/prysmaticlabs/fastssz"
 	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"github.com/sirupsen/logrus"
+)
+
+var (
+	MESSAGE_DOMAIN_INVALID_SNAPPY = [4]byte{0x00, 0x00, 0x00, 0x00}
+	MESSAGE_DOMAIN_VALID_SNAPPY   = [4]byte{0x01, 0x00, 0x00, 0x00}
 )
 
 func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, opts ...pubsub.PubOpt) error {
@@ -25,6 +35,7 @@ func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, o
 				"peers":       peerIDs,
 				"data-length": len(data),
 			}).Debug("sending message to peers")
+
 			return topicHandle.Publish(ctx, data, opts...)
 		}
 		select {
@@ -35,6 +46,27 @@ func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, o
 	}
 }
 
+func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, string, error) {
+	// Returns the encoded message and the (altair) message-id
+	s := sha256.New()
+	s.Write(MESSAGE_DOMAIN_VALID_SNAPPY[:])
+
+	topicLength := make([]byte, 8)
+	binary.LittleEndian.PutUint64(topicLength, uint64(len(topic)))
+	s.Write(topicLength)
+
+	s.Write([]byte(topic))
+
+	b, err := msg.MarshalSSZ()
+	if err != nil {
+		return nil, "", errors.Wrap(err, "failed to ssz-encode gossip message")
+	}
+	s.Write(b)
+
+	b = snappy.Encode(nil /*dst*/, b)
+	return b, string(s.Sum(nil)[:20]), nil
+}
+
 func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
 	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
 	defer cancel()
@@ -42,12 +74,16 @@ func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.Si
 		return errors.Wrap(err, "failed to wait for p2p connection")
 	}
 
-	buf := new(bytes.Buffer)
-	if _, err := sszNetworkEncoder.EncodeGossip(buf, signedBeaconBlockDeneb); err != nil {
-		return errors.Wrap(err, "failed to encode signed blob sidecar")
-	}
 	topic := signedBeaconBlockToTopic(p.state.GetForkDigest(), sszNetworkEncoder.ProtocolSuffix())
-	topicHandle, err := p.PubSub.Join(topic)
+
+	buf, messageID, err := EncodeGossip(topic, signedBeaconBlockDeneb)
+	if err != nil {
+		return errors.Wrap(err, "failed to encode signed beacon block deneb")
+	}
+
+	topicHandle, err := p.PubSub.Join(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
+		return messageID
+	}))
 	if err != nil {
 		return errors.Wrap(err, "failed to join topic")
 	}
@@ -55,7 +91,7 @@ func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.Si
 		"topic": topic,
 	}).Debug("BroadcastSignedBeaconBlockDeneb")
 
-	if err := PublishTopic(timeoutCtx, topicHandle, buf.Bytes()); err != nil {
+	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
 		return errors.Wrap(err, "failed to publish topic")
 	}
 	return nil
@@ -75,12 +111,16 @@ func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSi
 		subnet = &signedBlobSidecar.Message.Index
 	}
 
-	buf := new(bytes.Buffer)
-	if _, err := sszNetworkEncoder.EncodeGossip(buf, signedBlobSidecar); err != nil {
+	topic := blobSubnetToTopic(*subnet, p.state.GetForkDigest(), sszNetworkEncoder.ProtocolSuffix())
+
+	buf, messageID, err := EncodeGossip(topic, signedBlobSidecar)
+	if err != nil {
 		return errors.Wrap(err, "failed to encode signed blob sidecar")
 	}
-	topic := blobSubnetToTopic(*subnet, p.state.GetForkDigest(), sszNetworkEncoder.ProtocolSuffix())
-	topicHandle, err := p.PubSub.Join(topic)
+
+	topicHandle, err := p.PubSub.Join(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
+		return messageID
+	}))
 	if err != nil {
 		return errors.Wrap(err, "failed to join topic")
 	}
@@ -88,7 +128,7 @@ func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSi
 		"topic": topic,
 	}).Debug("BroadcastSignedBlobSidecar")
 
-	if err := PublishTopic(timeoutCtx, topicHandle, buf.Bytes()); err != nil {
+	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
 		return errors.Wrap(err, "failed to publish topic")
 	}
 	return nil

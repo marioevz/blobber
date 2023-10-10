@@ -110,13 +110,15 @@ func NewTestP2P(ctx context.Context, ip net.IP, port int64, chainState *common.S
 	}
 
 	libp2pOptions := []libp2p.Option{
-		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/%d", ip.String(), port)), libp2p.UserAgent("HiveSim/0.1.0"),
+		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/%d", ip.String(), port)),
+		libp2p.UserAgent("Blobber/0.1.0"),
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 		libp2p.DefaultMuxers,
 		libp2p.Security(noise.ID, noise.New),
 		libp2p.Ping(false),
 		libp2p.Identity(priv),
+		libp2p.ResourceManager(&network.NullResourceManager{}),
 	}
 
 	h, err := libp2p.New(libp2pOptions...)
