@@ -13,9 +13,7 @@ import (
 	"github.com/marioevz/blobber/p2p"
 	"github.com/marioevz/blobber/validator_proxy"
 	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
-	"github.com/marioevz/eth-clients/clients/validator"
 	"github.com/pkg/errors"
-	blsu "github.com/protolambda/bls12-381-util"
 	"github.com/protolambda/eth2api"
 	"github.com/protolambda/zrnt/eth2/beacon"
 	beacon_common "github.com/protolambda/zrnt/eth2/beacon/common"
@@ -104,7 +102,7 @@ func NewBlobber(ctx context.Context, opts ...Option) (*Blobber, error) {
 	return b, nil
 }
 
-func (b *Blobber) beaconBlockDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
+func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
 	return beacon_common.ComputeDomain(
 		beacon_common.DOMAIN_BEACON_PROPOSER,
 		b.cfg.spec.ForkVersion(slot),
@@ -112,7 +110,7 @@ func (b *Blobber) beaconBlockDomain(slot beacon_common.Slot) beacon_common.BLSDo
 	)
 }
 
-func (b *Blobber) beaconSidecarDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
+func (b *Blobber) calcBlobSidecarDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
 	b.cfg.spec.ForkVersion(slot)
 	return beacon_common.ComputeDomain(
 		beacon_common.DOMAIN_BLOB_SIDECAR,
@@ -179,20 +177,9 @@ func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 	return nil
 }
 
-func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *validator.ValidatorKeys) (bool, error) {
+func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *[32]byte) (bool, error) {
 
-	// Sign block and blobs
-	signedBlock, err := b.SignBlock(blResponse.Block, proposerKey)
-	if err != nil {
-		logrus.WithError(err).Error("Failed to sign block")
-		return false, errors.Wrap(err, "failed to sign block")
-	}
-	signedBlobs, err := b.SignBlobs(blResponse.Blobs, proposerKey)
-	if err != nil {
-		logrus.WithError(err).Error("failed to sign blobs")
-		return false, errors.Wrap(err, "failed to sign blobs")
-	}
-
+	// Log current action info
 	blockRoot, err := blResponse.Block.HashTreeRoot()
 	if err != nil {
 		logrus.WithError(err).Error("Failed to get block hash tree root")
@@ -203,9 +190,7 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		"block_root":        fmt.Sprintf("%x", blockRoot),
 		"parent_block_root": fmt.Sprintf("%x", blResponse.Block.ParentRoot),
 		"blob_count":        len(blResponse.Blobs),
-	}).Info("Prepared signed block and blobs")
-
-	// TODO: We need to discern between the different types of clients, and send the block to the correct one
+	}).Info("Preparing action for block and blobs")
 
 	// Peer with the beacon nodes and broadcast the block and blobs
 	testP2P, err := p2p.NewTestP2P(b.ctx, b.cfg.externalIP, int64(PortBeaconTCP), b.chainStatus)
@@ -226,74 +211,16 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		}
 	}
 
-	// Broadcast the blobs
-	for _, signedBlob := range signedBlobs {
-		if err := testP2P.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
-			logrus.WithError(err).Error("Failed to broadcast signed blob sidecar")
-			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
-		}
+	calcBeaconBlockDomain := b.calcBeaconBlockDomain(beacon_common.Slot(blResponse.Block.Slot))
+	blobSidecarDomain := b.calcBlobSidecarDomain(beacon_common.Slot(blResponse.Block.Slot))
+
+	var slotAction SlotAction
+
+	if slotAction == nil {
+		slotAction = DefaultSlotAction{}
 	}
 
-	// Broadcast the block
-	if err := testP2P.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
-		logrus.WithError(err).Error("Failed to broadcast signed beacon block")
-		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
-	}
-
-	return true, nil
-}
-
-func (b *Blobber) SignBlock(block *eth.BeaconBlockDeneb, proposerKey *validator.ValidatorKeys) (*eth.SignedBeaconBlockDeneb, error) {
-	blockHTR, err := block.HashTreeRoot()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get block hash tree root")
-	}
-
-	signingRoot := beacon_common.ComputeSigningRoot(
-		tree.Root(blockHTR),
-		b.beaconBlockDomain(beacon_common.Slot(block.Slot)),
-	)
-
-	sk := new(blsu.SecretKey)
-	sk.Deserialize(&proposerKey.ValidatorSecretKey)
-	signature := blsu.Sign(sk, signingRoot[:]).Serialize()
-	signedBlock := eth.SignedBeaconBlockDeneb{}
-	signedBlock.Block = block
-	signedBlock.Signature = signature[:]
-	return &signedBlock, nil
-}
-
-func (b *Blobber) SignBlob(blob *eth.BlobSidecar, proposerKey *validator.ValidatorKeys) (*eth.SignedBlobSidecar, error) {
-
-	blobHTR, err := blob.HashTreeRoot()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get block hash tree root")
-	}
-
-	signingRoot := beacon_common.ComputeSigningRoot(
-		tree.Root(blobHTR),
-		b.beaconSidecarDomain(beacon_common.Slot(blob.Slot)),
-	)
-
-	sk := new(blsu.SecretKey)
-	sk.Deserialize(&proposerKey.ValidatorSecretKey)
-	signature := blsu.Sign(sk, signingRoot[:]).Serialize()
-	signedBlob := eth.SignedBlobSidecar{}
-	signedBlob.Message = blob
-	signedBlob.Signature = signature[:]
-	return &signedBlob, nil
-}
-
-func (b *Blobber) SignBlobs(blobs []*eth.BlobSidecar, proposerKey *validator.ValidatorKeys) ([]*eth.SignedBlobSidecar, error) {
-	signedBlobs := make([]*eth.SignedBlobSidecar, len(blobs))
-	for i, blob := range blobs {
-		signedBlob, err := b.SignBlob(blob, proposerKey)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to sign blob")
-		}
-		signedBlobs[i] = signedBlob
-	}
-	return signedBlobs, nil
+	return slotAction.Execute(testP2P, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, proposerKey)
 }
 
 func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id int, version int) validator_proxy.ResponseCallback {
@@ -315,24 +242,21 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 		if blockBlobResponse == nil {
 			return false, errors.Wrap(err, "response is nil")
 		}
-		var validatorKey *validator.ValidatorKeys
+		var validatorKey *[32]byte
 		if b.cfg.validatorKeys != nil {
 			validatorKey = b.cfg.validatorKeys[beacon_common.ValidatorIndex(blockBlobResponse.Block.ProposerIndex)]
 		}
-		fields := logrus.Fields{
-			"proxy_id":        id,
-			"endpoint":        request.URL.Path,
-			"endpoint_method": request.Method,
-			"version":         version,
-			"slot":            slot,
-			"block_version":   blockVersion,
-			"blob_count":      len(blockBlobResponse.Blobs),
-		}
-		if validatorKey != nil {
-			fields["proposer_index"] = blockBlobResponse.Block.ProposerIndex
-			fields["proposer_pubkey"] = fmt.Sprintf("%x", validatorKey.ValidatorPubkey)
-		}
-		logrus.WithFields(fields).Debug("Received response")
+		logrus.WithFields(logrus.Fields{
+			"proxy_id":               id,
+			"endpoint":               request.URL.Path,
+			"endpoint_method":        request.Method,
+			"version":                version,
+			"slot":                   slot,
+			"block_version":          blockVersion,
+			"blob_count":             len(blockBlobResponse.Blobs),
+			"proposer_index":         blockBlobResponse.Block.ProposerIndex,
+			"proposer_key_available": validatorKey != nil,
+		}).Debug("Received response")
 
 		// Update the chainstate
 		if err := b.updateStatus(cl); err != nil {

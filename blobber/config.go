@@ -19,7 +19,7 @@ type config struct {
 	externalIP            net.IP
 	beaconGenesisTime     beacon.Timestamp
 	genesisValidatorsRoot tree.Root
-	validatorKeys         map[beacon.ValidatorIndex]*validator.ValidatorKeys
+	validatorKeys         map[beacon.ValidatorIndex]*[32]byte
 
 	mutex sync.Mutex
 }
@@ -134,7 +134,11 @@ func WithValidatorKeys(vk map[beacon.ValidatorIndex]*validator.ValidatorKeys) Op
 		apply: func(b *Blobber) error {
 			b.cfg.mutex.Lock()
 			defer b.cfg.mutex.Unlock()
-			b.cfg.validatorKeys = vk
+			b.cfg.validatorKeys = make(map[beacon.ValidatorIndex]*[32]byte)
+			for s, k := range vk {
+				sk := k.ValidatorSecretKey
+				b.cfg.validatorKeys[s] = &sk
+			}
 			return nil
 		},
 		description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
@@ -146,9 +150,10 @@ func WithValidatorKeysArray(vk []*validator.ValidatorKeys) Option {
 		apply: func(b *Blobber) error {
 			b.cfg.mutex.Lock()
 			defer b.cfg.mutex.Unlock()
-			vkMap := make(map[beacon.ValidatorIndex]*validator.ValidatorKeys)
+			vkMap := make(map[beacon.ValidatorIndex]*[32]byte)
 			for i, v := range vk {
-				vkMap[beacon.ValidatorIndex(i)] = v
+				sk := v.ValidatorSecretKey
+				vkMap[beacon.ValidatorIndex(i)] = &sk
 			}
 			b.cfg.validatorKeys = vkMap
 			return nil
