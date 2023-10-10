@@ -193,6 +193,18 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		return nil
 	}
 
+	blockRoot, err := blResponse.Block.HashTreeRoot()
+	if err != nil {
+		logrus.WithError(err).Error("Failed to get block hash tree root")
+		return nil
+	}
+	logrus.WithFields(logrus.Fields{
+		"slot":              blResponse.Block.Slot,
+		"block_root":        fmt.Sprintf("%x", blockRoot),
+		"parent_block_root": fmt.Sprintf("%x", blResponse.Block.ParentRoot),
+		"blob_count":        len(blResponse.Blobs),
+	}).Info("Prepared signed block and blobs")
+
 	// TODO: We need to discern between the different types of clients, and send the block to the correct one
 
 	// Peer with the beacon nodes and broadcast the block and blobs
