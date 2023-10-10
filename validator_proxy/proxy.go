@@ -122,9 +122,20 @@ func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallb
 		// We may want to filter some headers, otherwise we could just use a shallow copy
 		// proxyReq.Header = req.Header
 		proxyReq.Header = make(http.Header)
+		fields := make(logrus.Fields)
 		for h, val := range r.Header {
+			if h == "Accept-Encoding" {
+				// Remove encoding from the request so we are able to decode it
+				continue
+			}
+			if h == "Accept" {
+				// Modify the accept header to only accept json
+				val = []string{"application/json"}
+			}
+			fields[h] = val
 			proxyReq.Header[h] = val
 		}
+		logrus.WithFields(fields).Debug("Proxying request")
 
 		client := &http.Client{}
 		proxyRes, err := client.Do(proxyReq)

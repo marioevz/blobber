@@ -56,6 +56,10 @@ type Blobber struct {
 	forkDecoder *beacon.ForkDecoder
 }
 
+func init() {
+	logrus.SetLevel(logrus.InfoLevel)
+}
+
 func NewBlobber(ctx context.Context, opts ...Option) (*Blobber, error) {
 	var (
 		err error
@@ -284,11 +288,17 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 	return func(request *http.Request, response []byte) error {
 		var slot beacon_common.Slot
 		if err := slot.UnmarshalJSON([]byte(mux.Vars(request)["slot"])); err != nil {
-			return err
+			return errors.Wrap(err, "failed to unmarshal slot")
 		}
 		blockVersion, blockBlobResponse, err := ParseResponse(response)
 		if err != nil {
-			return err
+			logrus.WithFields(logrus.Fields{
+				"proxy_id": id,
+				"version":  version,
+				"slot":     slot,
+				"response": string(response),
+			}).Debug("Failed to parse response")
+			return errors.Wrap(err, "failed to parse response")
 		}
 		if blockBlobResponse == nil {
 			return nil
@@ -342,17 +352,18 @@ func ParseResponse(response []byte) (string, *eth.BeaconBlockAndBlobsDeneb, erro
 		err             error
 	)
 	if err := json.Unmarshal(response, &blockDataStruct); err != nil {
-		return blockDataStruct.Version, nil, err
+		return blockDataStruct.Version, nil, errors.Wrap(err, "failed to unmarshal response into BlockDataStruct")
 	}
 
 	if blockDataStruct.Version != "deneb" {
 		logrus.WithField("version", blockDataStruct.Version).Warn("Unsupported version, skipping actions")
+		return blockDataStruct.Version, nil, nil
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(blockDataStruct.Data))
 	data := new(shared.BeaconBlockContentsDeneb)
 	if err := decoder.Decode(&data); err != nil {
-		return blockDataStruct.Version, nil, err
+		return blockDataStruct.Version, nil, errors.Wrap(err, "failed to decode block contents")
 	}
 
 	beaconBlockContents := new(eth.BeaconBlockAndBlobsDeneb)
