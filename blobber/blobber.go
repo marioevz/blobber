@@ -226,18 +226,18 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		}
 	}
 
-	// Broadcast the block
-	if err := testP2P.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
-		logrus.WithError(err).Error("Failed to broadcast signed beacon block")
-		return nil
-	}
-
 	// Broadcast the blobs
 	for _, signedBlob := range signedBlobs {
 		if err := testP2P.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
 			logrus.WithError(err).Error("Failed to broadcast signed blob sidecar")
 			return nil
 		}
+	}
+
+	// Broadcast the block
+	if err := testP2P.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+		logrus.WithError(err).Error("Failed to broadcast signed beacon block")
+		return nil
 	}
 
 	return fmt.Errorf("sent blobs through p2p")
