@@ -12,6 +12,8 @@ import (
 )
 
 type config struct {
+	sync.Mutex
+
 	id                     int
 	port                   int
 	proxiesPortStart       int
@@ -23,7 +25,8 @@ type config struct {
 	validatorKeys          map[beacon.ValidatorIndex]*[32]byte
 	maxDevP2PSessionReuses int
 
-	mutex sync.Mutex
+	slotAction          SlotAction
+	slotActionFrequency uint64
 }
 
 type Option struct {
@@ -38,8 +41,8 @@ func (o Option) MarshalText() ([]byte, error) {
 func WithID(id int) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.id = id
 			return nil
 		},
@@ -50,8 +53,8 @@ func WithID(id int) Option {
 func WithHost(host string) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.host = host
 			return nil
 		},
@@ -62,8 +65,8 @@ func WithHost(host string) Option {
 func WithExternalIP(ip net.IP) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.externalIP = ip
 			return nil
 		},
@@ -74,8 +77,8 @@ func WithExternalIP(ip net.IP) Option {
 func WithPort(port int) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.port = port
 			return nil
 		},
@@ -100,8 +103,8 @@ func WithLogLevel(level string) Option {
 func WithMaxDevP2PSessionReuses(reuse int) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.maxDevP2PSessionReuses = reuse
 			return nil
 		},
@@ -112,8 +115,8 @@ func WithMaxDevP2PSessionReuses(reuse int) Option {
 func WithProxiesPortStart(portStart int) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.proxiesPortStart = portStart
 			return nil
 		},
@@ -124,8 +127,8 @@ func WithProxiesPortStart(portStart int) Option {
 func WithSpec(spec *beacon.Spec) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.spec = spec
 			return nil
 		},
@@ -136,8 +139,8 @@ func WithSpec(spec *beacon.Spec) Option {
 func WithBeaconGenesisTime(t beacon.Timestamp) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.beaconGenesisTime = t
 			return nil
 		},
@@ -148,8 +151,8 @@ func WithBeaconGenesisTime(t beacon.Timestamp) Option {
 func WithGenesisValidatorsRoot(t tree.Root) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.genesisValidatorsRoot = t
 			return nil
 		},
@@ -160,8 +163,8 @@ func WithGenesisValidatorsRoot(t tree.Root) Option {
 func WithValidatorKeys(vk map[beacon.ValidatorIndex]*validator.ValidatorKeys) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			b.cfg.validatorKeys = make(map[beacon.ValidatorIndex]*[32]byte)
 			for s, k := range vk {
 				sk := k.ValidatorSecretKey
@@ -176,8 +179,8 @@ func WithValidatorKeys(vk map[beacon.ValidatorIndex]*validator.ValidatorKeys) Op
 func WithValidatorKeysArray(vk []*validator.ValidatorKeys) Option {
 	return Option{
 		apply: func(b *Blobber) error {
-			b.cfg.mutex.Lock()
-			defer b.cfg.mutex.Unlock()
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
 			vkMap := make(map[beacon.ValidatorIndex]*[32]byte)
 			for i, v := range vk {
 				sk := v.ValidatorSecretKey
@@ -187,5 +190,29 @@ func WithValidatorKeysArray(vk []*validator.ValidatorKeys) Option {
 			return nil
 		},
 		description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
+	}
+}
+
+func WithSlotAction(action SlotAction) Option {
+	return Option{
+		apply: func(b *Blobber) error {
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
+			b.cfg.slotAction = action
+			return nil
+		},
+		description: fmt.Sprintf("WithSlotAction(%s)", action),
+	}
+}
+
+func WithSlotActionFrequency(freq uint64) Option {
+	return Option{
+		apply: func(b *Blobber) error {
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
+			b.cfg.slotActionFrequency = freq
+			return nil
+		},
+		description: fmt.Sprintf("WithSlotActionFrequency(%d)", freq),
 	}
 }
