@@ -49,6 +49,8 @@ type Blobber struct {
 
 	// State objects
 	chainStatus *common.Status
+	lastTestP2P *p2p.TestP2P
+	testP2PUses int
 
 	// Other
 	forkDecoder *beacon.ForkDecoder
@@ -177,12 +179,40 @@ func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 	return nil
 }
 
+func (b *Blobber) getTestP2P() (*p2p.TestP2P, error) {
+	var testP2P *p2p.TestP2P
+
+	if b.lastTestP2P != nil {
+		if b.testP2PUses >= b.cfg.maxDevP2PSessionReuses {
+			// Close the last one
+			b.lastTestP2P.Close()
+			b.lastTestP2P = nil
+			b.testP2PUses = 0
+		} else {
+			testP2P = b.lastTestP2P
+			b.testP2PUses++
+		}
+	}
+
+	if testP2P == nil {
+		// Generate a new one
+		var err error
+		testP2P, err = p2p.NewTestP2P(b.ctx, b.cfg.externalIP, int64(PortBeaconTCP), b.chainStatus)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create p2p")
+		}
+		b.lastTestP2P = testP2P
+		b.testP2PUses = 1
+	}
+
+	return testP2P, nil
+}
+
 func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *[32]byte) (bool, error) {
 
 	// Log current action info
 	blockRoot, err := blResponse.Block.HashTreeRoot()
 	if err != nil {
-		logrus.WithError(err).Error("Failed to get block hash tree root")
 		return false, errors.Wrap(err, "failed to get block hash tree root")
 	}
 	logrus.WithFields(logrus.Fields{
@@ -193,12 +223,10 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	}).Info("Preparing action for block and blobs")
 
 	// Peer with the beacon nodes and broadcast the block and blobs
-	testP2P, err := p2p.NewTestP2P(b.ctx, b.cfg.externalIP, int64(PortBeaconTCP), b.chainStatus)
+	testP2P, err := b.getTestP2P()
 	if err != nil {
-		logrus.WithError(err).Error("Failed to create p2p")
 		return false, errors.Wrap(err, "failed to create p2p")
 	}
-	defer testP2P.Close()
 	logrus.WithFields(logrus.Fields{
 		"peer_id": testP2P.Host.ID().String(),
 	}).Debug("Created test p2p")
@@ -206,7 +234,6 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	// Connect to the beacon nodes
 	for _, cl := range b.cls {
 		if err := testP2P.Connect(b.ctx, cl); err != nil {
-			logrus.WithError(err).Error("Failed to connect to beacon node")
 			return false, errors.Wrap(err, "failed to connect to beacon node")
 		}
 	}

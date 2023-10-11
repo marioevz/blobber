@@ -225,7 +225,16 @@ func (p *TestP2P) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 }
 
 func (p *TestP2P) Close() error {
-	p.cancel()
+	// Send goodbye to each peer
+	peers := p.Host.Network().Peers()
+	if len(peers) > 0 {
+		for i, peer := range peers {
+			if err := p.Goodbye(p.ctx, peer); err != nil {
+				logrus.WithError(err).Errorf("failed to send goodbye to peer %d", i)
+			}
+		}
+	}
+	defer p.cancel()
 	return p.Host.Close()
 }
 
@@ -398,6 +407,31 @@ func (p *TestP2P) SetupStreams() error {
 			return
 		}
 	})
+
+	return nil
+}
+
+func (p *TestP2P) Goodbye(ctx context.Context, peer peer.ID) error {
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+
+	// Open stream
+	s, err := p.Host.NewStream(ctx, peer, GoodbyeProtocolID)
+	if err != nil {
+		return errors.Wrap(err, "failed to open stream")
+	}
+
+	var resp Goodbye
+	if _, err := s.Write([]byte{0x00}); err != nil {
+		return errors.Wrap(err, "failed write response chunk byte")
+	}
+	if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, &resp); err != nil {
+		return errors.Wrap(err, "failed write goodbye message")
+	}
+
+	if err := s.CloseWrite(); err != nil {
+		return errors.Wrap(err, "failed to close stream")
+	}
 
 	return nil
 }

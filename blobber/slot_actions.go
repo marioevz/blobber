@@ -7,7 +7,6 @@ import (
 	beacon_common "github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/ztyp/tree"
 	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
-	"github.com/sirupsen/logrus"
 )
 
 type SlotAction interface {
@@ -87,26 +86,57 @@ func (dsa DefaultSlotAction) Execute(
 	// Sign block and blobs
 	signedBlock, err := SignBlock(beaconBlock, beaconBlockDomain, proposerKey)
 	if err != nil {
-		logrus.WithError(err).Error("Failed to sign block")
 		return false, errors.Wrap(err, "failed to sign block")
 	}
 	signedBlobs, err := SignBlobs(blobSidecars, blobSidecarDomain, proposerKey)
 	if err != nil {
-		logrus.WithError(err).Error("failed to sign blobs")
+		return false, errors.Wrap(err, "failed to sign blobs")
+	}
+
+	// Broadcast the block
+	if err := testP2P.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
+	}
+
+	// Broadcast the blobs
+	for _, signedBlob := range signedBlobs {
+		if err := testP2P.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
+		}
+	}
+
+	return true, nil
+}
+
+type BroadcastBlobsBeforeBlockAction struct{}
+
+func (dsa BroadcastBlobsBeforeBlockAction) Execute(
+	testP2P *p2p.TestP2P,
+	beaconBlock *eth.BeaconBlockDeneb,
+	beaconBlockDomain beacon_common.BLSDomain,
+	blobSidecars []*eth.BlobSidecar,
+	blobSidecarDomain beacon_common.BLSDomain,
+	proposerKey *[32]byte,
+) (bool, error) {
+	// Sign block and blobs
+	signedBlock, err := SignBlock(beaconBlock, beaconBlockDomain, proposerKey)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to sign block")
+	}
+	signedBlobs, err := SignBlobs(blobSidecars, blobSidecarDomain, proposerKey)
+	if err != nil {
 		return false, errors.Wrap(err, "failed to sign blobs")
 	}
 
 	// Broadcast the blobs
 	for _, signedBlob := range signedBlobs {
 		if err := testP2P.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
-			logrus.WithError(err).Error("Failed to broadcast signed blob sidecar")
 			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 		}
 	}
 
 	// Broadcast the block
 	if err := testP2P.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
-		logrus.WithError(err).Error("Failed to broadcast signed beacon block")
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 

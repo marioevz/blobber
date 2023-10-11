@@ -46,7 +46,7 @@ func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, o
 	}
 }
 
-func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, string, error) {
+func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, []byte, error) {
 	// Returns the encoded message and the (altair) message-id
 	s := sha256.New()
 	s.Write(MESSAGE_DOMAIN_VALID_SNAPPY[:])
@@ -59,12 +59,12 @@ func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, string, error) {
 
 	b, err := msg.MarshalSSZ()
 	if err != nil {
-		return nil, "", errors.Wrap(err, "failed to ssz-encode gossip message")
+		return nil, nil, errors.Wrap(err, "failed to ssz-encode gossip message")
 	}
 	s.Write(b)
 
 	b = snappy.Encode(nil /*dst*/, b)
-	return b, string(s.Sum(nil)[:20]), nil
+	return b, s.Sum(nil)[:20], nil
 }
 
 func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
@@ -82,14 +82,22 @@ func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.Si
 	}
 
 	topicHandle, err := p.PubSub.Join(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
-		return messageID
+		return string(messageID)
 	}))
 	if err != nil {
 		return errors.Wrap(err, "failed to join topic")
 	}
+	blockRoot, err := signedBeaconBlockDeneb.Block.HashTreeRoot()
+	if err != nil {
+		return errors.Wrap(err, "failed to get block hash tree root")
+	}
 	logrus.WithFields(logrus.Fields{
-		"topic": topic,
-	}).Debug("BroadcastSignedBeaconBlockDeneb")
+		"topic":      topic,
+		"block_root": fmt.Sprintf("%x", blockRoot),
+		"slot":       signedBeaconBlockDeneb.Block.Slot,
+		"signature":  fmt.Sprintf("%x", signedBeaconBlockDeneb.Signature),
+		"message_id": fmt.Sprintf("%x", messageID),
+	}).Debug("Broadcasting signed beacon block deneb")
 
 	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
 		return errors.Wrap(err, "failed to publish topic")
@@ -119,14 +127,20 @@ func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSi
 	}
 
 	topicHandle, err := p.PubSub.Join(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
-		return messageID
+		return string(messageID)
 	}))
 	if err != nil {
 		return errors.Wrap(err, "failed to join topic")
 	}
 	logrus.WithFields(logrus.Fields{
-		"topic": topic,
-	}).Debug("BroadcastSignedBlobSidecar")
+		"topic":          topic,
+		"block_root":     fmt.Sprintf("%x", signedBlobSidecar.Message.BlockRoot),
+		"index":          signedBlobSidecar.Message.Index,
+		"slot":           signedBlobSidecar.Message.Slot,
+		"kzg_commitment": fmt.Sprintf("%x", signedBlobSidecar.Message.KzgCommitment),
+		"signature":      fmt.Sprintf("%x", signedBlobSidecar.Signature),
+		"message_id":     fmt.Sprintf("%x", messageID),
+	}).Debug("Broadcasting signed blob sidecar")
 
 	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
 		return errors.Wrap(err, "failed to publish topic")

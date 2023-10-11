@@ -8,18 +8,20 @@ import (
 	"github.com/marioevz/eth-clients/clients/validator"
 	beacon "github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/ztyp/tree"
+	"github.com/sirupsen/logrus"
 )
 
 type config struct {
-	id                    int
-	port                  int
-	proxiesPortStart      int
-	host                  string
-	spec                  *beacon.Spec
-	externalIP            net.IP
-	beaconGenesisTime     beacon.Timestamp
-	genesisValidatorsRoot tree.Root
-	validatorKeys         map[beacon.ValidatorIndex]*[32]byte
+	id                     int
+	port                   int
+	proxiesPortStart       int
+	host                   string
+	spec                   *beacon.Spec
+	externalIP             net.IP
+	beaconGenesisTime      beacon.Timestamp
+	genesisValidatorsRoot  tree.Root
+	validatorKeys          map[beacon.ValidatorIndex]*[32]byte
+	maxDevP2PSessionReuses int
 
 	mutex sync.Mutex
 }
@@ -78,6 +80,32 @@ func WithPort(port int) Option {
 			return nil
 		},
 		description: fmt.Sprintf("WithPort(%d)", port),
+	}
+}
+
+func WithLogLevel(level string) Option {
+	return Option{
+		apply: func(_ *Blobber) error {
+			lvl, err := logrus.ParseLevel(level)
+			if err != nil {
+				return err
+			}
+			logrus.SetLevel(lvl)
+			return nil
+		},
+		description: fmt.Sprintf("WithLogLevel(%s)", level),
+	}
+}
+
+func WithMaxDevP2PSessionReuses(reuse int) Option {
+	return Option{
+		apply: func(b *Blobber) error {
+			b.cfg.mutex.Lock()
+			defer b.cfg.mutex.Unlock()
+			b.cfg.maxDevP2PSessionReuses = reuse
+			return nil
+		},
+		description: fmt.Sprintf("WithMaxDevP2PSessionReuses(%d)", reuse),
 	}
 }
 
