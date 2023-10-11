@@ -102,7 +102,7 @@ func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.Si
 	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
 		return errors.Wrap(err, "failed to publish topic")
 	}
-	return nil
+	return topicHandle.Close()
 }
 
 func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar, subnet *uint64) error {
@@ -145,7 +145,7 @@ func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSi
 	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
 		return errors.Wrap(err, "failed to publish topic")
 	}
-	return nil
+	return topicHandle.Close()
 }
 
 func signedBeaconBlockToTopic(forkDigest [4]byte, protocolSuffix string) string {
