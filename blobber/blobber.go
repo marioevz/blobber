@@ -208,6 +208,25 @@ func (b *Blobber) getTestP2P() (*p2p.TestP2P, error) {
 	return testP2P, nil
 }
 
+func (b *Blobber) getSlotAction(slot uint64) (SlotAction, error) {
+	var slotAction SlotAction
+
+	b.cfg.Lock()
+	defer b.cfg.Unlock()
+
+	if b.cfg.slotAction != nil {
+		if b.cfg.slotActionFrequency <= 1 || slot%b.cfg.slotActionFrequency == 0 {
+			slotAction = b.cfg.slotAction
+		}
+	}
+
+	if slotAction == nil {
+		slotAction = Default{}
+	}
+
+	return slotAction, nil
+}
+
 func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *[32]byte) (bool, error) {
 
 	// Log current action info
@@ -241,10 +260,12 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	calcBeaconBlockDomain := b.calcBeaconBlockDomain(beacon_common.Slot(blResponse.Block.Slot))
 	blobSidecarDomain := b.calcBlobSidecarDomain(beacon_common.Slot(blResponse.Block.Slot))
 
-	var slotAction SlotAction
-
+	slotAction, err := b.getSlotAction(uint64(blResponse.Block.Slot))
+	if err != nil {
+		return false, errors.Wrap(err, "failed to get slot action")
+	}
 	if slotAction == nil {
-		slotAction = DefaultSlotAction{}
+		panic("slot action is nil")
 	}
 
 	return slotAction.Execute(testP2P, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, proposerKey)
