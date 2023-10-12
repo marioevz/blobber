@@ -11,7 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/marioevz/blobber/blobber"
+	"github.com/marioevz/blobber"
+	"github.com/marioevz/blobber/config"
+	"github.com/marioevz/blobber/slot_actions"
 	"github.com/marioevz/eth-clients/clients"
 	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
 	"github.com/sirupsen/logrus"
@@ -163,24 +165,24 @@ func main() {
 		beaconClients[i] = bn
 	}
 
-	blobberOpts := []blobber.Option{
-		blobber.WithHost(hostIP),
-		blobber.WithExternalIP(net.ParseIP(externalIP)),
-		blobber.WithSpec(beaconClients[0].Config.Spec),
-		blobber.WithBeaconGenesisTime(*beaconClients[0].Config.GenesisTime),
-		blobber.WithGenesisValidatorsRoot(*beaconClients[0].Config.GenesisValidatorsRoot),
-		blobber.WithValidatorKeysListFromFile(validatorKeyFilePath),
-		blobber.WithProxiesPortStart(validatorProxyPortStart),
-		blobber.WithSlotActionFrequency(uint64(slotActionFrequency)),
-		blobber.WithLogLevel(logLevel),
+	blobberOpts := []config.Option{
+		config.WithHost(hostIP),
+		config.WithExternalIP(net.ParseIP(externalIP)),
+		config.WithSpec(beaconClients[0].Config.Spec),
+		config.WithBeaconGenesisTime(*beaconClients[0].Config.GenesisTime),
+		config.WithGenesisValidatorsRoot(*beaconClients[0].Config.GenesisValidatorsRoot),
+		config.WithValidatorKeysListFromFile(validatorKeyFilePath),
+		config.WithProxiesPortStart(validatorProxyPortStart),
+		config.WithSlotActionFrequency(uint64(slotActionFrequency)),
+		config.WithLogLevel(logLevel),
 	}
 
 	if slotActionJson != "" {
-		slotAction, err := blobber.UnmarshallSlotAction([]byte(slotActionJson))
+		slotAction, err := slot_actions.UnmarshallSlotAction([]byte(slotActionJson))
 		if err != nil {
 			fatalf("error parsing slot action: %v\n", err)
 		}
-		blobberOpts = append(blobberOpts, blobber.WithSlotAction(slotAction))
+		blobberOpts = append(blobberOpts, config.WithSlotAction(slotAction))
 	}
 
 	b, err := blobber.NewBlobber(context.Background(), blobberOpts...)
