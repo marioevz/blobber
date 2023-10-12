@@ -1,4 +1,4 @@
-FROM golang:1.20.1-buster AS builder
+FROM golang:1.20.1-buster
 
 # Override the default value of GOOS and GOARCH when building the Docker image using the --build-arg flag
 ARG GOOS=linux
@@ -14,10 +14,6 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -v ./cmd/blobber.go
+RUN GOOS=${GOOS} GOARCH=${GOARCH} go build -v ./cmd/blobber.go
 
-FROM alpine:latest
-
-COPY --from=builder /build/blobber /blobber
-
-ENTRYPOINT ["/blobber"]
+ENTRYPOINT ["/build/blobber"]
