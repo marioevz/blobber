@@ -1,4 +1,4 @@
-package blobber
+package slot_actions
 
 import (
 	"crypto/rand"

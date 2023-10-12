@@ -1,15 +1,15 @@
-package blobber_test
+package config_test
 
 import (
 	"fmt"
 	"testing"
 
-	"github.com/marioevz/blobber/blobber"
+	"github.com/marioevz/blobber/config"
 )
 
 func TestKeysFromFile(t *testing.T) {
 	testFile := "keys_test.txt"
-	vk, err := blobber.KeyListFromFile(testFile)
+	vk, err := config.KeyListFromFile(testFile)
 	if err != nil {
 		t.Fatalf("failed to read keys from file: %s", err)
 	}

@@ -1,36 +1,46 @@
-package blobber
+package config
 
 import (
 	"fmt"
 	"net"
 	"sync"
 
+	"github.com/marioevz/blobber/slot_actions"
 	beacon "github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/ztyp/tree"
 	"github.com/sirupsen/logrus"
 )
 
-type config struct {
+type Config struct {
 	sync.Mutex
 
-	id                     int
-	port                   int
-	proxiesPortStart       int
-	host                   string
-	spec                   *beacon.Spec
-	externalIP             net.IP
-	beaconGenesisTime      beacon.Timestamp
-	genesisValidatorsRoot  tree.Root
-	validatorKeys          map[beacon.ValidatorIndex]*ValidatorKey
-	validatorKeysList      []*ValidatorKey
-	maxDevP2PSessionReuses int
+	ID                     int
+	Port                   int
+	ProxiesPortStart       int
+	Host                   string
+	Spec                   *beacon.Spec
+	ExternalIP             net.IP
+	BeaconGenesisTime      beacon.Timestamp
+	GenesisValidatorsRoot  tree.Root
+	ValidatorKeys          map[beacon.ValidatorIndex]*ValidatorKey
+	ValidatorKeysList      []*ValidatorKey
+	MaxDevP2PSessionReuses int
 
-	slotAction          SlotAction
-	slotActionFrequency uint64
+	SlotAction          slot_actions.SlotAction
+	SlotActionFrequency uint64
+}
+
+func (cfg *Config) Apply(opts ...Option) error {
+	for _, opt := range opts {
+		if err := opt.apply(cfg); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type Option struct {
-	apply       func(b *Blobber) error
+	apply       func(cfg *Config) error
 	description string
 }
 
@@ -40,10 +50,10 @@ func (o Option) MarshalText() ([]byte, error) {
 
 func WithID(id int) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.id = id
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.ID = id
 			return nil
 		},
 		description: fmt.Sprintf("WithID(%d)", id),
@@ -52,10 +62,10 @@ func WithID(id int) Option {
 
 func WithHost(host string) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.host = host
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.Host = host
 			return nil
 		},
 		description: fmt.Sprintf("WithHost(%s)", host),
@@ -64,10 +74,10 @@ func WithHost(host string) Option {
 
 func WithExternalIP(ip net.IP) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.externalIP = ip
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.ExternalIP = ip
 			return nil
 		},
 		description: fmt.Sprintf("WithExternalIP(%s)", ip),
@@ -76,10 +86,10 @@ func WithExternalIP(ip net.IP) Option {
 
 func WithPort(port int) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.port = port
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.Port = port
 			return nil
 		},
 		description: fmt.Sprintf("WithPort(%d)", port),
@@ -88,7 +98,7 @@ func WithPort(port int) Option {
 
 func WithLogLevel(level string) Option {
 	return Option{
-		apply: func(_ *Blobber) error {
+		apply: func(_ *Config) error {
 			lvl, err := logrus.ParseLevel(level)
 			if err != nil {
 				return err
@@ -102,10 +112,10 @@ func WithLogLevel(level string) Option {
 
 func WithMaxDevP2PSessionReuses(reuse int) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.maxDevP2PSessionReuses = reuse
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.MaxDevP2PSessionReuses = reuse
 			return nil
 		},
 		description: fmt.Sprintf("WithMaxDevP2PSessionReuses(%d)", reuse),
@@ -114,10 +124,10 @@ func WithMaxDevP2PSessionReuses(reuse int) Option {
 
 func WithProxiesPortStart(portStart int) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.proxiesPortStart = portStart
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.ProxiesPortStart = portStart
 			return nil
 		},
 		description: fmt.Sprintf("WithProxiesPortStart(%d)", portStart),
@@ -126,10 +136,10 @@ func WithProxiesPortStart(portStart int) Option {
 
 func WithSpec(spec *beacon.Spec) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.spec = spec
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.Spec = spec
 			return nil
 		},
 		description: "WithSpec", // TODO: actually format the spec
@@ -138,10 +148,10 @@ func WithSpec(spec *beacon.Spec) Option {
 
 func WithBeaconGenesisTime(t beacon.Timestamp) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.beaconGenesisTime = t
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.BeaconGenesisTime = t
 			return nil
 		},
 		description: fmt.Sprintf("WithBeaconGenesisTime(%d)", t),
@@ -150,10 +160,10 @@ func WithBeaconGenesisTime(t beacon.Timestamp) Option {
 
 func WithGenesisValidatorsRoot(t tree.Root) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.genesisValidatorsRoot = t
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.GenesisValidatorsRoot = t
 			return nil
 		},
 		description: fmt.Sprintf("WithGenesisValidatorsRoot(0x%x)", t),
@@ -162,10 +172,10 @@ func WithGenesisValidatorsRoot(t tree.Root) Option {
 
 func WithValidatorKeys(vk map[beacon.ValidatorIndex]*ValidatorKey) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.validatorKeys = vk
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.ValidatorKeys = vk
 			return nil
 		},
 		description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
@@ -174,10 +184,10 @@ func WithValidatorKeys(vk map[beacon.ValidatorIndex]*ValidatorKey) Option {
 
 func WithValidatorKeysList(vk []*ValidatorKey) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.validatorKeysList = vk
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.ValidatorKeysList = vk
 			return nil
 		},
 		description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
@@ -186,26 +196,26 @@ func WithValidatorKeysList(vk []*ValidatorKey) Option {
 
 func WithValidatorKeysListFromFile(path string) Option {
 	return Option{
-		apply: func(b *Blobber) error {
+		apply: func(cfg *Config) error {
 			vk, err := KeyListFromFile(path)
 			if err != nil {
 				return err
 			}
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.validatorKeysList = vk
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.ValidatorKeysList = vk
 			return nil
 		},
 		description: fmt.Sprintf("WithValidatorKeysListFromFile(%s)", path),
 	}
 }
 
-func WithSlotAction(action SlotAction) Option {
+func WithSlotAction(action slot_actions.SlotAction) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.slotAction = action
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.SlotAction = action
 			return nil
 		},
 		description: fmt.Sprintf("WithSlotAction(%s)", action),
@@ -214,10 +224,10 @@ func WithSlotAction(action SlotAction) Option {
 
 func WithSlotActionFrequency(freq uint64) Option {
 	return Option{
-		apply: func(b *Blobber) error {
-			b.cfg.Lock()
-			defer b.cfg.Unlock()
-			b.cfg.slotActionFrequency = freq
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.SlotActionFrequency = freq
 			return nil
 		},
 		description: fmt.Sprintf("WithSlotActionFrequency(%d)", freq),

@@ -1,9 +1,9 @@
-package blobber_test
+package slot_actions_test
 
 import (
 	"testing"
 
-	"github.com/marioevz/blobber/blobber"
+	"github.com/marioevz/blobber/slot_actions"
 )
 
 func TestSlotActionsJsonParsing(t *testing.T) {
@@ -11,11 +11,11 @@ func TestSlotActionsJsonParsing(t *testing.T) {
 		"name": "broadcast_blobs_before_block"
 	}
 	`
-	act, err := blobber.UnmarshallSlotAction([]byte(jsonString))
+	act, err := slot_actions.UnmarshallSlotAction([]byte(jsonString))
 	if err != nil {
 		t.Fatalf("UnmarshallSlotAction() error = %v", err)
 	}
-	if _, ok := act.(*blobber.BroadcastBlobsBeforeBlock); !ok {
+	if _, ok := act.(*slot_actions.BroadcastBlobsBeforeBlock); !ok {
 		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
 	}
 	jsonString = `{
@@ -23,11 +23,11 @@ func TestSlotActionsJsonParsing(t *testing.T) {
 		"incorrect_kzg_commitment": true
 	}
 	`
-	act, err = blobber.UnmarshallSlotAction([]byte(jsonString))
+	act, err = slot_actions.UnmarshallSlotAction([]byte(jsonString))
 	if err != nil {
 		t.Fatalf("UnmarshallSlotAction() error = %v", err)
 	}
-	if extraBlobs, ok := act.(*blobber.ExtraBlobs); !ok {
+	if extraBlobs, ok := act.(*slot_actions.ExtraBlobs); !ok {
 		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
 	} else {
 		if extraBlobs.IncorrectKZGCommitment != true {

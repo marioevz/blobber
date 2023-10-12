@@ -1,4 +1,4 @@
-package blobber
+package config
 
 import (
 	"bufio"

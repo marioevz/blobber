@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/marioevz/blobber/blobber"
+	"github.com/marioevz/blobber"
 )
 
 //go:embed response_deneb.json
