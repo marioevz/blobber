@@ -143,7 +143,7 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_pro
 	fmt.Printf("Adding proxy for %s\n", beaconEndpoint)
 	id := len(b.proxies)
 	port := b.cfg.proxiesPortStart + id
-	proxy, err := validator_proxy.NewProxy(b.ctx, id, b.cfg.host, b.cfg.externalIP, port, beaconEndpoint,
+	proxy, err := validator_proxy.NewProxy(b.ctx, id, b.cfg.host, port, beaconEndpoint,
 		map[string]validator_proxy.ResponseCallback{
 			"/eth/v2/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 2),
 			"/eth/v3/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 3),
