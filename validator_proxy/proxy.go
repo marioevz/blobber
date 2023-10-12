@@ -16,9 +16,8 @@ import (
 )
 
 type ValidatorProxy struct {
-	host       string
-	externalIP string
-	port       int
+	host string
+	port int
 
 	id     int
 	target *url.URL
@@ -33,15 +32,13 @@ func NewProxy(
 	ctx context.Context,
 	id int,
 	host string,
-	externalIP net.IP,
 	port int,
 	destination string,
 	responseCallbacks map[string]ResponseCallback,
 ) (*ValidatorProxy, error) {
 	proxy := &ValidatorProxy{
-		host:       host,
-		externalIP: externalIP.String(),
-		port:       port,
+		host: host,
+		port: port,
 	}
 
 	router := mux.NewRouter()
@@ -76,10 +73,6 @@ func NewProxy(
 
 func (p *ValidatorProxy) ID() int {
 	return p.id
-}
-
-func (p *ValidatorProxy) ExternalIP() string {
-	return p.externalIP
 }
 
 func (p *ValidatorProxy) Port() int {
