@@ -115,6 +115,7 @@ func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallb
 		// proxyReq.Header = req.Header
 		proxyReq.Header = make(http.Header)
 		fields := make(logrus.Fields)
+		fields["fullUrl"] = fullUrl.String()
 		for h, val := range r.Header {
 			if h == "Accept-Encoding" {
 				// Remove encoding from the request so we are able to decode it
@@ -194,7 +195,7 @@ func (p *ValidatorProxy) Start(ctx context.Context) error {
 		"validator_proxy_id": p.id,
 		"port":               p.port,
 		// "pubkey":             p.pkBeacon.String(),
-		"destination_address": p.Address(),
+		"listening_endpoint": p.Address(),
 	}
 	logrus.WithFields(fields).Info("Proxy now listening")
 	go func() {
