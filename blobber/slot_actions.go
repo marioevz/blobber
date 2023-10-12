@@ -47,7 +47,6 @@ func SignBlock(block *eth.BeaconBlockDeneb, beaconBlockDomain beacon_common.BLSD
 }
 
 func SignBlob(blob *eth.BlobSidecar, blobSidecarDomain beacon_common.BLSDomain, proposerKey *[32]byte) (*eth.SignedBlobSidecar, error) {
-
 	blobHTR, err := blob.HashTreeRoot()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get block hash tree root")

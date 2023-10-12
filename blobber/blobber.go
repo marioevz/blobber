@@ -152,6 +152,25 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_pro
 		panic(err)
 	}
 	b.proxies = append(b.proxies, proxy)
+
+	// Update the validators map
+	if b.cfg.validatorKeys == nil {
+		b.cfg.validatorKeys = make(map[beacon_common.ValidatorIndex]*ValidatorKey)
+	}
+	validatorResponses, err := cl.StateValidators(b.ctx, eth2api.StateHead, nil, nil)
+	if err != nil {
+		panic(err)
+	}
+	for _, validatorResponse := range validatorResponses {
+		validatorIndex := validatorResponse.Index
+		validatorPubkey := validatorResponse.Validator.Pubkey
+		for _, key := range b.cfg.validatorKeysList {
+			if bytes.Equal(key.ValidatorPubkey[:], validatorPubkey[:]) {
+				b.cfg.validatorKeys[validatorIndex] = key
+				break
+			}
+		}
+	}
 	return proxy
 }
 
@@ -227,8 +246,7 @@ func (b *Blobber) getSlotAction(slot uint64) (SlotAction, error) {
 	return slotAction, nil
 }
 
-func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *[32]byte) (bool, error) {
-
+func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *ValidatorKey) (bool, error) {
 	// Log current action info
 	blockRoot, err := blResponse.Block.HashTreeRoot()
 	if err != nil {
@@ -268,7 +286,7 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		panic("slot action is nil")
 	}
 
-	return slotAction.Execute(testP2P, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, proposerKey)
+	return slotAction.Execute(testP2P, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, &proposerKey.ValidatorSecretKey)
 }
 
 func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id int, version int) validator_proxy.ResponseCallback {
@@ -290,7 +308,7 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 		if blockBlobResponse == nil {
 			return false, errors.Wrap(err, "response is nil")
 		}
-		var validatorKey *[32]byte
+		var validatorKey *ValidatorKey
 		if b.cfg.validatorKeys != nil {
 			validatorKey = b.cfg.validatorKeys[beacon_common.ValidatorIndex(blockBlobResponse.Block.ProposerIndex)]
 		}
