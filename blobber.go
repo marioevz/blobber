@@ -126,7 +126,6 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_pro
 	logrus.WithFields(logrus.Fields{
 		"beacon_endpoint": beaconEndpoint,
 	}).Info("Adding proxy")
-	fmt.Printf("Adding proxy for %s\n", beaconEndpoint)
 	id := len(b.proxies)
 	port := b.cfg.ProxiesPortStart + id
 	proxy, err := validator_proxy.NewProxy(b.ctx, id, b.cfg.Host, port, beaconEndpoint,
