@@ -5,7 +5,6 @@ import (
 	"net"
 	"sync"
 
-	"github.com/marioevz/eth-clients/clients/validator"
 	beacon "github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/ztyp/tree"
 	"github.com/sirupsen/logrus"
@@ -22,7 +21,8 @@ type config struct {
 	externalIP             net.IP
 	beaconGenesisTime      beacon.Timestamp
 	genesisValidatorsRoot  tree.Root
-	validatorKeys          map[beacon.ValidatorIndex]*[32]byte
+	validatorKeys          map[beacon.ValidatorIndex]*ValidatorKey
+	validatorKeysList      []*ValidatorKey
 	maxDevP2PSessionReuses int
 
 	slotAction          SlotAction
@@ -160,36 +160,43 @@ func WithGenesisValidatorsRoot(t tree.Root) Option {
 	}
 }
 
-func WithValidatorKeys(vk map[beacon.ValidatorIndex]*validator.ValidatorKeys) Option {
+func WithValidatorKeys(vk map[beacon.ValidatorIndex]*ValidatorKey) Option {
 	return Option{
 		apply: func(b *Blobber) error {
 			b.cfg.Lock()
 			defer b.cfg.Unlock()
-			b.cfg.validatorKeys = make(map[beacon.ValidatorIndex]*[32]byte)
-			for s, k := range vk {
-				sk := k.ValidatorSecretKey
-				b.cfg.validatorKeys[s] = &sk
-			}
+			b.cfg.validatorKeys = vk
 			return nil
 		},
 		description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
 	}
 }
 
-func WithValidatorKeysArray(vk []*validator.ValidatorKeys) Option {
+func WithValidatorKeysList(vk []*ValidatorKey) Option {
 	return Option{
 		apply: func(b *Blobber) error {
 			b.cfg.Lock()
 			defer b.cfg.Unlock()
-			vkMap := make(map[beacon.ValidatorIndex]*[32]byte)
-			for i, v := range vk {
-				sk := v.ValidatorSecretKey
-				vkMap[beacon.ValidatorIndex(i)] = &sk
-			}
-			b.cfg.validatorKeys = vkMap
+			b.cfg.validatorKeysList = vk
 			return nil
 		},
 		description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
+	}
+}
+
+func WithValidatorKeysListFromFile(path string) Option {
+	return Option{
+		apply: func(b *Blobber) error {
+			vk, err := KeyListFromFile(path)
+			if err != nil {
+				return err
+			}
+			b.cfg.Lock()
+			defer b.cfg.Unlock()
+			b.cfg.validatorKeysList = vk
+			return nil
+		},
+		description: fmt.Sprintf("WithValidatorKeysListFromFile(%s)", path),
 	}
 }
 
