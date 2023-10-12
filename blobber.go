@@ -51,7 +51,7 @@ type Blobber struct {
 
 	// State objects
 	chainStatus *common.Status
-	lastTestP2P *p2p.TestP2P
+	lastTestP2P p2p.TestP2Ps
 	testP2PUses int
 
 	// Other
@@ -101,29 +101,18 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 	return b, nil
 }
 
-func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
-	return beacon_common.ComputeDomain(
-		beacon_common.DOMAIN_BEACON_PROPOSER,
-		b.cfg.Spec.ForkVersion(slot),
-		b.cfg.GenesisValidatorsRoot,
-	)
-}
-
-func (b *Blobber) calcBlobSidecarDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
-	b.cfg.Spec.ForkVersion(slot)
-	return beacon_common.ComputeDomain(
-		beacon_common.DOMAIN_BLOB_SIDECAR,
-		b.cfg.Spec.ForkVersion(slot),
-		b.cfg.GenesisValidatorsRoot,
-	)
-}
-
 func (b *Blobber) Address() string {
 	return fmt.Sprintf(
 		"http://%s:%d",
 		b.cfg.ExternalIP,
 		b.cfg.Port,
 	)
+}
+
+func (b *Blobber) Close() {
+	for _, proxy := range b.proxies {
+		proxy.Cancel()
+	}
 }
 
 func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_proxy.ValidatorProxy {
@@ -171,12 +160,6 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_pro
 	return proxy
 }
 
-func (b *Blobber) Close() {
-	for _, proxy := range b.proxies {
-		proxy.Cancel()
-	}
-}
-
 func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 	ctx, cancel := context.WithTimeout(b.ctx, time.Second*1)
 	defer cancel()
@@ -195,33 +178,38 @@ func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 	return nil
 }
 
-func (b *Blobber) getTestP2P() (*p2p.TestP2P, error) {
-	var testP2P *p2p.TestP2P
+func (b *Blobber) getTestP2P(count int) (p2p.TestP2Ps, error) {
+	var testP2Ps p2p.TestP2Ps
 
 	if b.lastTestP2P != nil {
-		if b.testP2PUses >= b.cfg.MaxDevP2PSessionReuses {
+		if b.testP2PUses >= b.cfg.MaxDevP2PSessionReuses || len(b.lastTestP2P) != count {
 			// Close the last one
 			b.lastTestP2P.Close()
 			b.lastTestP2P = nil
 			b.testP2PUses = 0
 		} else {
-			testP2P = b.lastTestP2P
+			testP2Ps = b.lastTestP2P
 			b.testP2PUses++
 		}
 	}
 
-	if testP2P == nil {
+	if testP2Ps == nil {
 		// Generate a new one
-		var err error
-		testP2P, err = p2p.NewTestP2P(b.ctx, b.cfg.ExternalIP, int64(PortBeaconTCP), b.chainStatus)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create p2p")
+		testP2Ps = make(p2p.TestP2Ps, 0)
+		for i := 0; i < count; i++ {
+			testP2P, err := p2p.NewTestP2P(b.ctx, b.cfg.ExternalIP, int64(PortBeaconTCP+i), b.chainStatus)
+			if err != nil {
+				// close the ones we actually created
+				testP2Ps.Close()
+				return nil, errors.Wrap(err, "failed to create p2p")
+			}
+			testP2Ps = append(testP2Ps, testP2P)
 		}
-		b.lastTestP2P = testP2P
+		b.lastTestP2P = testP2Ps
 		b.testP2PUses = 1
 	}
 
-	return testP2P, nil
+	return testP2Ps, nil
 }
 
 func (b *Blobber) getSlotAction(slot uint64) (slot_actions.SlotAction, error) {
@@ -243,6 +231,23 @@ func (b *Blobber) getSlotAction(slot uint64) (slot_actions.SlotAction, error) {
 	return slotAction, nil
 }
 
+func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
+	return beacon_common.ComputeDomain(
+		beacon_common.DOMAIN_BEACON_PROPOSER,
+		b.cfg.Spec.ForkVersion(slot),
+		b.cfg.GenesisValidatorsRoot,
+	)
+}
+
+func (b *Blobber) calcBlobSidecarDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
+	b.cfg.Spec.ForkVersion(slot)
+	return beacon_common.ComputeDomain(
+		beacon_common.DOMAIN_BLOB_SIDECAR,
+		b.cfg.Spec.ForkVersion(slot),
+		b.cfg.GenesisValidatorsRoot,
+	)
+}
+
 func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *config.ValidatorKey) (bool, error) {
 	// Log current action info
 	blockRoot, err := blResponse.Block.HashTreeRoot()
@@ -256,25 +261,6 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		"blob_count":        len(blResponse.Blobs),
 	}).Info("Preparing action for block and blobs")
 
-	// Peer with the beacon nodes and broadcast the block and blobs
-	testP2P, err := b.getTestP2P()
-	if err != nil {
-		return false, errors.Wrap(err, "failed to create p2p")
-	}
-	logrus.WithFields(logrus.Fields{
-		"peer_id": testP2P.Host.ID().String(),
-	}).Debug("Created test p2p")
-
-	// Connect to the beacon nodes
-	for _, cl := range b.cls {
-		if err := testP2P.Connect(b.ctx, cl); err != nil {
-			return false, errors.Wrap(err, "failed to connect to beacon node")
-		}
-	}
-
-	calcBeaconBlockDomain := b.calcBeaconBlockDomain(beacon_common.Slot(blResponse.Block.Slot))
-	blobSidecarDomain := b.calcBlobSidecarDomain(beacon_common.Slot(blResponse.Block.Slot))
-
 	slotAction, err := b.getSlotAction(uint64(blResponse.Block.Slot))
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get slot action")
@@ -283,7 +269,34 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		panic("slot action is nil")
 	}
 
-	return slotAction.Execute(testP2P, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, &proposerKey.ValidatorSecretKey)
+	testP2PCount := slotAction.GetTestP2PCount()
+
+	// Peer with the beacon nodes and broadcast the block and blobs
+	testP2Ps, err := b.getTestP2P(testP2PCount)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to create p2p")
+	} else if len(testP2Ps) != testP2PCount {
+		return false, fmt.Errorf("failed to create p2p, expected %d, got %d", testP2PCount, len(testP2Ps))
+	}
+	for i, testP2P := range testP2Ps {
+		logrus.WithFields(logrus.Fields{
+			"index":   i,
+			"peer_id": testP2P.Host.ID().String(),
+		}).Debug("Created test p2p")
+	}
+
+	// Connect to the beacon nodes
+	for i, cl := range b.cls {
+		testP2P := testP2Ps[i%len(testP2Ps)]
+		if err := testP2P.Connect(b.ctx, cl); err != nil {
+			return false, errors.Wrap(err, "failed to connect to beacon node")
+		}
+	}
+
+	calcBeaconBlockDomain := b.calcBeaconBlockDomain(beacon_common.Slot(blResponse.Block.Slot))
+	blobSidecarDomain := b.calcBlobSidecarDomain(beacon_common.Slot(blResponse.Block.Slot))
+
+	return slotAction.Execute(testP2Ps, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, &proposerKey.ValidatorSecretKey)
 }
 
 func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id int, version int) validator_proxy.ResponseCallback {
