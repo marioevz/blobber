@@ -1,19 +1,22 @@
-FROM golang:1.20.1-buster
+FROM golang:1.20.10-bullseye as builder
 
-# Override the default value of GOOS and GOARCH when building the Docker image using the --build-arg flag
+# Override the default value of GOOS when building the Docker image using the --build-arg flag
 ARG GOOS=linux
-ARG GOARCH=amd64
+
 
 WORKDIR /build
-# Copy and download dependencies using go mod
-COPY go.mod .
-COPY go.sum .
-RUN go mod download
-
 # Copy the code into the container
 COPY . .
+RUN go mod download
 
-# Build the application
-RUN GOOS=${GOOS} GOARCH=${GOARCH} go build -v ./cmd/blobber.go
+# Build the application statically
+RUN cd cmd && GOOS=${GOOS} go build -o blobber.bin .
 
-ENTRYPOINT ["/build/blobber"]
+FROM debian:bullseye-slim
+
+COPY --from=builder /build/cmd/blobber.bin /blobber.bin
+
+# Ensure the binary is executable
+RUN chmod +x /blobber.bin
+
+ENTRYPOINT ["/blobber.bin"]
