@@ -3,12 +3,19 @@ module github.com/marioevz/blobber
 go 1.20
 
 require (
+	github.com/crate-crypto/go-kzg-4844 v0.3.0
 	github.com/ethereum/go-ethereum v1.13.2
+	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb
 	github.com/gorilla/mux v1.8.0
 	github.com/libp2p/go-libp2p v0.27.8
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
 	github.com/marioevz/eth-clients v0.0.0-20230522233947-def6b7ee1b42
+	github.com/multiformats/go-multiaddr v0.9.0
+	github.com/pkg/errors v0.9.1
+	github.com/protolambda/bls12-381-util v0.0.0-20220416220906-d8552aa452c7
+	github.com/protolambda/eth2api v0.0.0-20230316214135-5f8afbd6d05d
 	github.com/protolambda/zrnt v0.30.0
+	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/fastssz v0.0.0-20221107182844-78142813af44
 	github.com/prysmaticlabs/prysm/v4 v4.1.0-alpha.1
 	github.com/sirupsen/logrus v1.9.3
@@ -36,7 +43,6 @@ require (
 	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
-	github.com/crate-crypto/go-kzg-4844 v0.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
 	github.com/deckarep/golang-set/v2 v2.1.0 // indirect
@@ -61,7 +67,6 @@ require (
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
-	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
@@ -116,7 +121,6 @@ require (
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.2.0 // indirect
-	github.com/multiformats/go-multiaddr v0.9.0 // indirect
 	github.com/multiformats/go-multiaddr-dns v0.3.1 // indirect
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
 	github.com/multiformats/go-multibase v0.2.0 // indirect
@@ -129,15 +133,11 @@ require (
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.14.0 // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
 	github.com/prometheus/prom2json v1.3.0 // indirect
-	github.com/protolambda/bls12-381-util v0.0.0-20220416220906-d8552aa452c7 // indirect
-	github.com/protolambda/eth2api v0.0.0-20230316214135-5f8afbd6d05d // indirect
-	github.com/protolambda/ztyp v0.2.2 // indirect
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7 // indirect
 	github.com/prysmaticlabs/gohashtree v0.0.3-alpha // indirect
 	github.com/prysmaticlabs/prombbolt v0.0.0-20210126082820-9b7adba6db7c // indirect
@@ -200,3 +200,7 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.0.2 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
+
+replace github.com/protolambda/eth2api => github.com/marioevz/eth2api v0.0.0-20230922201437-72bd1301e033
+
+replace github.com/protolambda/zrnt => github.com/marioevz/zrnt v0.26.2-0.20230927204959-21993eae2d9f
