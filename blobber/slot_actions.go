@@ -2,6 +2,7 @@ package blobber
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -76,6 +77,39 @@ func SignBlobs(blobs []*eth.BlobSidecar, blobSidecarDomain beacon_common.BLSDoma
 		signedBlobs[i] = signedBlob
 	}
 	return signedBlobs, nil
+}
+
+func UnmarshallSlotAction(data []byte) (SlotAction, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	type actionName struct {
+		Name string `json:"name"`
+	}
+	var actionNameObj actionName
+	if err := json.Unmarshal(data, &actionNameObj); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshall slot action name")
+	}
+
+	var action SlotAction
+	switch actionNameObj.Name {
+	case "default":
+		action = &Default{}
+	case "broadcast_blobs_before_block":
+		action = &BroadcastBlobsBeforeBlock{}
+	case "blob_gossip_delay":
+		action = &BlobGossipDelay{}
+	case "extra_blobs":
+		action = &ExtraBlobs{}
+	default:
+		return nil, fmt.Errorf("unknown slot action name: %s", actionNameObj.Name)
+	}
+
+	if err := json.Unmarshal(data, &action); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshall slot action")
+	}
+	return action, nil
 }
 
 type Default struct{}
