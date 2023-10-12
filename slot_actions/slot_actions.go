@@ -230,6 +230,7 @@ type ExtraBlobs struct {
 	IncorrectKZGCommitment  bool `json:"incorrect_kzg_commitment"`
 	IncorrectKZGProof       bool `json:"incorrect_kzg_proof"`
 	IncorrectBlockRoot      bool `json:"incorrect_block_root"`
+	IncorrectSignature      bool `json:"incorrect_signature"`
 	DelayMilliseconds       int  `json:"delay_milliseconds"`
 	BroadcastBlockFirst     bool `json:"broadcast_block_last"`
 	BroadcastExtraBlobFirst bool `json:"broadcast_extra_blob_last"`
@@ -287,17 +288,36 @@ func (s ExtraBlobs) Execute(
 	}
 
 	if s.IncorrectKZGCommitment {
+		fields := logrus.Fields{
+			"correct": fmt.Sprintf("%x", extraBlobSidecar.KzgCommitment),
+		}
 		rand.Read(extraBlobSidecar.KzgCommitment)
+		fields["corrupted"] = fmt.Sprintf("%x", extraBlobSidecar.KzgCommitment)
+		logrus.WithFields(fields).Debug("Corrupted blob sidecar kzg commitment")
 	}
 
 	if s.IncorrectKZGProof {
+		fields := logrus.Fields{
+			"correct": fmt.Sprintf("%x", extraBlobSidecar.KzgProof),
+		}
 		rand.Read(extraBlobSidecar.KzgProof)
+		fields["corrupted"] = fmt.Sprintf("%x", extraBlobSidecar.KzgProof)
+		logrus.WithFields(fields).Debug("Corrupted blob sidecar kzg proof")
 	}
 
 	// Sign the blob
 	signedExtraBlob, err := SignBlob(extraBlobSidecar, blobSidecarDomain, proposerKey)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to sign extra blob")
+	}
+
+	if s.IncorrectSignature {
+		fields := logrus.Fields{
+			"correct": fmt.Sprintf("%x", signedExtraBlob.Signature),
+		}
+		rand.Read(signedExtraBlob.Signature)
+		fields["corrupted"] = fmt.Sprintf("%x", signedExtraBlob.Signature)
+		logrus.WithFields(fields).Debug("Corrupted blob sidecar signature")
 	}
 
 	logrus.WithFields(
