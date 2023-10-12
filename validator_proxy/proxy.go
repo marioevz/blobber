@@ -38,7 +38,6 @@ func NewProxy(
 	destination string,
 	responseCallbacks map[string]ResponseCallback,
 ) (*ValidatorProxy, error) {
-
 	proxy := &ValidatorProxy{
 		host:       host,
 		externalIP: externalIP.String(),

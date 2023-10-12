@@ -247,7 +247,6 @@ func (b *Blobber) getSlotAction(slot uint64) (SlotAction, error) {
 }
 
 func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *ValidatorKey) (bool, error) {
-
 	// Log current action info
 	blockRoot, err := blResponse.Block.HashTreeRoot()
 	if err != nil {
