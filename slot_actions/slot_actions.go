@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/marioevz/blobber/kzg"
@@ -103,6 +104,8 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 		action = &BlobGossipDelay{}
 	case "extra_blobs":
 		action = &ExtraBlobs{}
+	case "conflicting_blobs":
+		action = &ConflictingBlobs{}
 	default:
 		return nil, fmt.Errorf("unknown slot action name: %s", actionNameObj.Name)
 	}
@@ -380,6 +383,110 @@ func (s ExtraBlobs) Execute(
 		if err := testP2Ps.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 		}
+	}
+
+	return true, nil
+}
+
+type ConflictingBlobs struct {
+	Default
+}
+
+func (s ConflictingBlobs) GetTestP2PCount() int {
+	// We are going to send two conflicting blobs through two different test p2p connections
+	return 2
+}
+
+func (s ConflictingBlobs) Execute(
+	testP2Ps p2p.TestP2Ps,
+	beaconBlock *eth.BeaconBlockDeneb,
+	beaconBlockDomain beacon_common.BLSDomain,
+	blobSidecars []*eth.BlobSidecar,
+	blobSidecarDomain beacon_common.BLSDomain,
+	proposerKey *[32]byte,
+) (bool, error) {
+	if len(testP2Ps) != 2 {
+		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testP2Ps))
+	}
+	if len(blobSidecars) < 1 {
+		return false, fmt.Errorf("expected at least 1 blob sidecar, got %d", len(blobSidecars))
+	}
+
+	// Sign block and blobs
+	signedBlock, err := SignBlock(beaconBlock, beaconBlockDomain, proposerKey)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to sign block")
+	}
+	signedBlobs, err := SignBlobs(blobSidecars, blobSidecarDomain, proposerKey)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to sign blobs")
+	}
+
+	// Generate the extra blob sidecar
+	conflictingBlobSidecar := &eth.BlobSidecar{
+		BlockRoot:       signedBlobs[0].Message.BlockRoot,
+		Index:           0,
+		Slot:            beaconBlock.Slot,
+		BlockParentRoot: beaconBlock.ParentRoot[:],
+		ProposerIndex:   beaconBlock.ProposerIndex,
+	}
+
+	if err := FillSidecarWithRandomBlob(conflictingBlobSidecar); err != nil {
+		return false, errors.Wrap(err, "failed to fill extra blob sidecar")
+	}
+	// Sign the blob
+	signedConflictingBlob, err := SignBlob(conflictingBlobSidecar, blobSidecarDomain, proposerKey)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to sign extra blob")
+	}
+
+	// Create the second list of sidecars
+	secondBlobSidecars := make([]*eth.SignedBlobSidecar, len(signedBlobs))
+	for i, signedBlobSidecar := range signedBlobs {
+		if i == 0 {
+			secondBlobSidecars[i] = signedConflictingBlob
+		} else {
+			secondBlobSidecars[i] = signedBlobSidecar
+		}
+	}
+
+	wg := sync.WaitGroup{}
+	errs := make(chan error, 2)
+	wg.Add(2)
+
+	// Broadcast the first list of blobs
+	go func() {
+		defer wg.Done()
+		for _, signedBlob := range signedBlobs {
+			if err := testP2Ps[0].BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+				errs <- err
+				return
+			}
+		}
+	}()
+
+	// Broadcast the second list of blobs
+	go func() {
+		defer wg.Done()
+		for _, signedBlob := range secondBlobSidecars {
+			if err := testP2Ps[1].BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+				errs <- err
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	select {
+	case err := <-errs:
+		return false, errors.Wrap(err, "failed to broadcast blob sidecars")
+	default:
+	}
+
+	// Broadcast the block
+	if err := testP2Ps.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
 	return true, nil
