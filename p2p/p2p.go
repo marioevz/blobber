@@ -58,6 +58,8 @@ type TestP2P struct {
 	state    *common.Status
 }
 
+type TestP2Ps []*TestP2P
+
 func createLocalNode(
 	privKey *ecdsa.PrivateKey,
 	ipAddr net.IP,
@@ -236,6 +238,15 @@ func (p *TestP2P) Close() error {
 	}
 	defer p.cancel()
 	return p.Host.Close()
+}
+
+func (pl TestP2Ps) Close() error {
+	for _, p := range pl {
+		if err := p.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *TestP2P) WaitForP2PConnection(ctx context.Context) error {
