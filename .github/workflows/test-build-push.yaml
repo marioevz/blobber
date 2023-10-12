@@ -40,4 +40,4 @@ jobs:
     - name: Test
       run: go test -v ./...
     - name: Build
-      run: go build -v .
+      run: go build -v ./cmd/blobber.go
