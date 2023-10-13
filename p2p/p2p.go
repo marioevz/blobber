@@ -33,8 +33,6 @@ import (
 )
 
 var sszNetworkEncoder = encoder.SszNetworkEncoder{}
-var testP2PCounter = atomic.Uint64{}
-var instanceID = uint64(0)
 
 type Goodbye = primitives.SSZUint64
 type PingData = primitives.SSZUint64
@@ -48,17 +46,31 @@ const (
 
 const pubsubQueueSize = 600
 
-func SetInstanceID(id uint64) {
-	instanceID = id
+const (
+	PortBeaconTCP = 9000
+)
+
+type TestP2P struct {
+	InstanceID  uint64
+	peerCounter atomic.Uint64
+
+	// State objects
+	ChainStatus  *common.Status
+	lastTestPeer TestPeers
+	testPeerUses int
+
+	// Config
+	ExternalIP             net.IP
+	MaxDevP2PSessionReuses int
 }
 
-type TestP2PID uint64
+type TestPeerIndex uint64
 
-func (id TestP2PID) String() string {
+func (id TestPeerIndex) String() string {
 	return fmt.Sprintf("%d", id)
 }
 
-func (id TestP2PID) Keys() (crypto.PrivKey, crypto.PubKey) {
+func (id TestPeerIndex) Keys(instanceID uint64) (crypto.PrivKey, crypto.PubKey) {
 	// Private keys are deterministic for testing purposes.
 	privKeyBytes := make([]byte, 32)
 	copy(privKeyBytes[:], []byte("blobber"))
@@ -72,8 +84,8 @@ func (id TestP2PID) Keys() (crypto.PrivKey, crypto.PubKey) {
 	return priv, pub
 }
 
-func (id TestP2PID) PeerID() string {
-	priv, _ := id.Keys()
+func (id TestPeerIndex) PeerID(instanceID uint64) string {
+	priv, _ := id.Keys(instanceID)
 	peerID, err := peer.IDFromPrivateKey(priv)
 	if err != nil {
 		panic(err)
@@ -81,8 +93,18 @@ func (id TestP2PID) PeerID() string {
 	return peerID.String()
 }
 
-type TestP2P struct {
-	ID         TestP2PID
+func (t *TestP2P) GetNextPeerIDs(count uint64) []string {
+	ids := make([]string, count)
+	startID := TestPeerIndex(t.peerCounter.Load() + 1)
+	for i := uint64(0); i < count; i++ {
+		ids[i] = startID.PeerID(t.InstanceID)
+		startID += 1
+	}
+	return ids
+}
+
+type TestPeer struct {
+	ID         TestPeerIndex
 	Host       host.Host
 	PubSub     *pubsub.PubSub
 	PrivateKey crypto.PrivKey
@@ -95,7 +117,7 @@ type TestP2P struct {
 	state    *common.Status
 }
 
-type TestP2Ps []*TestP2P
+type TestPeers []*TestPeer
 
 func createLocalNode(
 	privKey *ecdsa.PrivateKey,
@@ -137,17 +159,51 @@ func ConvertFromInterfacePrivKey(privkey crypto.PrivKey) (*ecdsa.PrivateKey, err
 	return privKey, nil
 }
 
-func NewTestP2P(ctx context.Context, ip net.IP, port int64, chainState *common.Status) (*TestP2P, error) {
-	if chainState == nil {
+func (t *TestP2P) GetTestPeer(ctx context.Context, count int) (TestPeers, error) {
+	var testPeers TestPeers
+
+	if t.lastTestPeer != nil {
+		if (t.MaxDevP2PSessionReuses > 0 && t.testPeerUses >= t.MaxDevP2PSessionReuses) || len(t.lastTestPeer) != count {
+			// Close the last one
+			t.lastTestPeer.Close()
+			t.lastTestPeer = nil
+			t.testPeerUses = 0
+		} else {
+			testPeers = t.lastTestPeer
+			t.testPeerUses++
+		}
+	}
+
+	if testPeers == nil {
+		// Generate a new one
+		testPeers = make(TestPeers, 0)
+		for i := 0; i < count; i++ {
+			testPeer, err := t.NewTestPeer(ctx, int64(PortBeaconTCP+i))
+			if err != nil {
+				// close the ones we actually created
+				testPeers.Close()
+				return nil, errors.Wrap(err, "failed to create p2p")
+			}
+			testPeers = append(testPeers, testPeer)
+		}
+		t.lastTestPeer = testPeers
+		t.testPeerUses = 1
+	}
+
+	return testPeers, nil
+}
+
+func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error) {
+	if t.ChainStatus == nil {
 		return nil, errors.New("chain state cannot be nil")
 	}
 
 	// Get the ID of this node.
-	id := TestP2PID(testP2PCounter.Add(1))
-	priv, pub := id.Keys()
+	id := TestPeerIndex(t.peerCounter.Add(1))
+	priv, pub := id.Keys(t.InstanceID)
 
 	libp2pOptions := []libp2p.Option{
-		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/%d", ip.String(), port)),
+		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/%d", t.ExternalIP.String(), port)),
 		libp2p.UserAgent("Blobber/0.1.0"),
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
@@ -178,13 +234,13 @@ func NewTestP2P(ctx context.Context, ip net.IP, port int64, chainState *common.S
 	if err != nil {
 		return nil, err
 	}
-	localNode, err := createLocalNode(pk, ip, int(port), int(port))
+	localNode, err := createLocalNode(pk, t.ExternalIP, int(port), int(port))
 	if err != nil {
 		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	testP2P := &TestP2P{
+	testPeer := &TestPeer{
 		ID:         id,
 		Host:       h,
 		PubSub:     ps,
@@ -197,19 +253,19 @@ func NewTestP2P(ctx context.Context, ip net.IP, port int64, chainState *common.S
 			Syncnets:  make([]byte, 1),
 		},
 
-		state: chainState,
+		state: t.ChainStatus,
 
 		ctx:    ctx,
 		cancel: cancel,
 	}
-	if err := testP2P.SetupStreams(); err != nil {
-		testP2P.Close()
+	if err := testPeer.SetupStreams(); err != nil {
+		testPeer.Close()
 		return nil, err
 	}
-	return testP2P, nil
+	return testPeer, nil
 }
 
-func (p *TestP2P) Connect(ctx context.Context, peer *BeaconClientPeer) error {
+func (p *TestPeer) Connect(ctx context.Context, peer *BeaconClientPeer) error {
 	peerAddrInfo, err := peer.GetPeerAddrInfo(ctx)
 	if err != nil {
 		return errors.Wrap(err, "could not get peer address info")
@@ -226,7 +282,7 @@ func (p *TestP2P) Connect(ctx context.Context, peer *BeaconClientPeer) error {
 	return nil
 }
 
-func (p *TestP2P) SendInitialStatus(ctx context.Context, peer peer.ID) error {
+func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 	// Open stream
 	peerInfo := p.Host.Peerstore().PeerInfo(peer)
 	logrus.WithFields(logrus.Fields{
@@ -264,7 +320,7 @@ func (p *TestP2P) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 	return nil
 }
 
-func (p *TestP2P) Close() error {
+func (p *TestPeer) Close() error {
 	// Send goodbye to each peer
 	peers := p.Host.Network().Peers()
 	if len(peers) > 0 {
@@ -278,7 +334,7 @@ func (p *TestP2P) Close() error {
 	return p.Host.Close()
 }
 
-func (pl TestP2Ps) Close() error {
+func (pl TestPeers) Close() error {
 	for _, p := range pl {
 		if err := p.Close(); err != nil {
 			return err
@@ -287,7 +343,7 @@ func (pl TestP2Ps) Close() error {
 	return nil
 }
 
-func (p *TestP2P) WaitForP2PConnection(ctx context.Context) error {
+func (p *TestPeer) WaitForP2PConnection(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -300,7 +356,7 @@ func (p *TestP2P) WaitForP2PConnection(ctx context.Context) error {
 	}
 }
 
-func (p *TestP2P) SetupStreams() error {
+func (p *TestPeer) SetupStreams() error {
 	// Prepare stream responses for the basic Req/Resp protocols.
 
 	// Status
@@ -466,7 +522,7 @@ func (p *TestP2P) SetupStreams() error {
 	return nil
 }
 
-func (p *TestP2P) Goodbye(ctx context.Context, peer peer.ID) error {
+func (p *TestPeer) Goodbye(ctx context.Context, peer peer.ID) error {
 	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
 

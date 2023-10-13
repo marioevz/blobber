@@ -47,12 +47,7 @@ type Blobber struct {
 	cls     []*p2p.BeaconClientPeer
 
 	// Configuration object
-	cfg *config.Config
-
-	// State objects
-	chainStatus *common.Status
-	lastTestP2P p2p.TestP2Ps
-	testP2PUses int
+	*config.Config
 
 	// Other
 	forkDecoder *beacon.ForkDecoder
@@ -64,39 +59,41 @@ func init() {
 
 func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 	b := &Blobber{
-		ctx:     ctx,
+		ctx: ctx,
+
 		proxies: make([]*validator_proxy.ValidatorProxy, 0),
 		cls:     make([]*p2p.BeaconClientPeer, 0),
 
-		cfg: &config.Config{
+		Config: &config.Config{
+			TestP2P: &p2p.TestP2P{
+				ChainStatus: common.NewStatus(),
+			},
 			Host:             DEFAULT_BLOBBER_HOST,
 			Port:             DEFAULT_BLOBBER_PORT,
 			ProxiesPortStart: DEFAULT_PROXIES_PORT_START,
 		},
-
-		chainStatus: common.NewStatus(),
 	}
 
 	// Apply the options
-	if err := b.cfg.Apply(opts...); err != nil {
+	if err := b.Config.Apply(opts...); err != nil {
 		return nil, errors.Wrap(err, "failed to apply options")
 	}
 
-	if b.cfg.Spec == nil {
+	if b.Spec == nil {
 		return nil, fmt.Errorf("no spec configured")
 	}
-	if b.cfg.ProxiesPortStart == 0 {
+	if b.ProxiesPortStart == 0 {
 		return nil, fmt.Errorf("no proxies port start configured")
 	}
-	if b.cfg.GenesisValidatorsRoot == (tree.Root{}) {
+	if b.GenesisValidatorsRoot == (tree.Root{}) {
 		return nil, fmt.Errorf("no genesis validators root configured")
 	}
-	if b.cfg.ExternalIP == nil {
+	if b.ExternalIP == nil {
 		return nil, fmt.Errorf("no external ip configured")
 	}
 
 	// Create the fork decoder
-	b.forkDecoder = beacon.NewForkDecoder(b.cfg.Spec, b.cfg.GenesisValidatorsRoot)
+	b.forkDecoder = beacon.NewForkDecoder(b.Spec, b.GenesisValidatorsRoot)
 
 	return b, nil
 }
@@ -104,8 +101,8 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 func (b *Blobber) Address() string {
 	return fmt.Sprintf(
 		"http://%s:%d",
-		b.cfg.ExternalIP,
-		b.cfg.Port,
+		b.ExternalIP,
+		b.Port,
 	)
 }
 
@@ -127,13 +124,13 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_pro
 		"beacon_endpoint": beaconEndpoint,
 	}).Info("Adding proxy")
 	id := len(b.proxies)
-	port := b.cfg.ProxiesPortStart + id
-	proxy, err := validator_proxy.NewProxy(b.ctx, id, b.cfg.Host, port, beaconEndpoint,
+	port := b.ProxiesPortStart + id
+	proxy, err := validator_proxy.NewProxy(b.ctx, id, b.Host, port, beaconEndpoint,
 		map[string]validator_proxy.ResponseCallback{
 			"/eth/v2/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 2),
 			"/eth/v3/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 3),
 		},
-		b.cfg.AlwaysErrorValidatorResponse,
+		b.AlwaysErrorValidatorResponse,
 	)
 	if err != nil {
 		panic(err)
@@ -141,8 +138,8 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_pro
 	b.proxies = append(b.proxies, proxy)
 
 	// Update the validators map
-	if b.cfg.ValidatorKeys == nil {
-		b.cfg.ValidatorKeys = make(map[beacon_common.ValidatorIndex]*config.ValidatorKey)
+	if b.ValidatorKeys == nil {
+		b.ValidatorKeys = make(map[beacon_common.ValidatorIndex]*config.ValidatorKey)
 	}
 	validatorResponses, err := cl.StateValidators(b.ctx, eth2api.StateHead, nil, nil)
 	if err != nil {
@@ -151,9 +148,9 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_pro
 	for _, validatorResponse := range validatorResponses {
 		validatorIndex := validatorResponse.Index
 		validatorPubkey := validatorResponse.Validator.Pubkey
-		for _, key := range b.cfg.ValidatorKeysList {
+		for _, key := range b.ValidatorKeysList {
 			if bytes.Equal(key.ValidatorPubkey[:], validatorPubkey[:]) {
-				b.cfg.ValidatorKeys[validatorIndex] = key
+				b.ValidatorKeys[validatorIndex] = key
 				break
 			}
 		}
@@ -171,57 +168,23 @@ func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 	}
 
 	// Update the chainstate
-	b.chainStatus.SetHead(block.Root(), block.Slot())
+	b.ChainStatus.SetHead(block.Root(), block.Slot())
 
 	// Update the fork digest
-	b.chainStatus.SetForkDigest(b.forkDecoder.ForkDigest(b.cfg.Spec.SlotToEpoch(block.Slot())))
+	b.ChainStatus.SetForkDigest(b.forkDecoder.ForkDigest(b.Spec.SlotToEpoch(block.Slot())))
 
 	return nil
-}
-
-func (b *Blobber) getTestP2P(count int) (p2p.TestP2Ps, error) {
-	var testP2Ps p2p.TestP2Ps
-
-	if b.lastTestP2P != nil {
-		if (b.cfg.MaxDevP2PSessionReuses > 0 && b.testP2PUses >= b.cfg.MaxDevP2PSessionReuses) || len(b.lastTestP2P) != count {
-			// Close the last one
-			b.lastTestP2P.Close()
-			b.lastTestP2P = nil
-			b.testP2PUses = 0
-		} else {
-			testP2Ps = b.lastTestP2P
-			b.testP2PUses++
-		}
-	}
-
-	if testP2Ps == nil {
-		// Generate a new one
-		testP2Ps = make(p2p.TestP2Ps, 0)
-		for i := 0; i < count; i++ {
-			testP2P, err := p2p.NewTestP2P(b.ctx, b.cfg.ExternalIP, int64(PortBeaconTCP+i), b.chainStatus)
-			if err != nil {
-				// close the ones we actually created
-				testP2Ps.Close()
-				return nil, errors.Wrap(err, "failed to create p2p")
-			}
-			testP2Ps = append(testP2Ps, testP2P)
-		}
-		b.lastTestP2P = testP2Ps
-		b.testP2PUses = 1
-	}
-
-	return testP2Ps, nil
 }
 
 func (b *Blobber) getSlotAction(slot uint64) (slot_actions.SlotAction, error) {
 	var slotAction slot_actions.SlotAction
 
-	b.cfg.Lock()
-	defer b.cfg.Unlock()
+	b.Lock()
+	defer b.Unlock()
 
-	if b.cfg.SlotAction != nil {
-		if b.cfg.SlotActionFrequency <= 1 || slot%b.cfg.SlotActionFrequency == 0 {
-			slotAction = b.cfg.SlotAction
+	if b.SlotAction != nil {
+		if b.SlotActionFrequency <= 1 || slot%b.SlotActionFrequency == 0 {
+			slotAction = b.SlotAction
 		}
 	}
 
@@ -235,17 +198,17 @@ func (b *Blobber) getSlotAction(slot uint64) (slot_actions.SlotAction, error) {
 func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
 	return beacon_common.ComputeDomain(
 		beacon_common.DOMAIN_BEACON_PROPOSER,
-		b.cfg.Spec.ForkVersion(slot),
-		b.cfg.GenesisValidatorsRoot,
+		b.Spec.ForkVersion(slot),
+		b.GenesisValidatorsRoot,
 	)
 }
 
 func (b *Blobber) calcBlobSidecarDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
-	b.cfg.Spec.ForkVersion(slot)
+	b.Spec.ForkVersion(slot)
 	return beacon_common.ComputeDomain(
 		beacon_common.DOMAIN_BLOB_SIDECAR,
-		b.cfg.Spec.ForkVersion(slot),
-		b.cfg.GenesisValidatorsRoot,
+		b.Spec.ForkVersion(slot),
+		b.GenesisValidatorsRoot,
 	)
 }
 
@@ -270,26 +233,26 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		panic("slot action is nil")
 	}
 
-	testP2PCount := slotAction.GetTestP2PCount()
+	testPeerCount := slotAction.GetTestPeerCount()
 
 	// Peer with the beacon nodes and broadcast the block and blobs
-	testP2Ps, err := b.getTestP2P(testP2PCount)
+	testPeers, err := b.GetTestPeer(b.ctx, testPeerCount)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to create p2p")
-	} else if len(testP2Ps) != testP2PCount {
-		return false, fmt.Errorf("failed to create p2p, expected %d, got %d", testP2PCount, len(testP2Ps))
+	} else if len(testPeers) != testPeerCount {
+		return false, fmt.Errorf("failed to create p2p, expected %d, got %d", testPeerCount, len(testPeers))
 	}
-	for i, testP2P := range testP2Ps {
+	for i, testPeer := range testPeers {
 		logrus.WithFields(logrus.Fields{
 			"index":   i,
-			"peer_id": testP2P.Host.ID().String(),
+			"peer_id": testPeer.Host.ID().String(),
 		}).Debug("Created test p2p")
 	}
 
 	// Connect to the beacon nodes
 	for i, cl := range b.cls {
-		testP2P := testP2Ps[i%len(testP2Ps)]
-		if err := testP2P.Connect(b.ctx, cl); err != nil {
+		testPeer := testPeers[i%len(testPeers)]
+		if err := testPeer.Connect(b.ctx, cl); err != nil {
 			return false, errors.Wrap(err, "failed to connect to beacon node")
 		}
 	}
@@ -297,7 +260,7 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	calcBeaconBlockDomain := b.calcBeaconBlockDomain(beacon_common.Slot(blResponse.Block.Slot))
 	blobSidecarDomain := b.calcBlobSidecarDomain(beacon_common.Slot(blResponse.Block.Slot))
 
-	return slotAction.Execute(testP2Ps, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, &proposerKey.ValidatorSecretKey)
+	return slotAction.Execute(testPeers, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, &proposerKey.ValidatorSecretKey)
 }
 
 func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id int, version int) validator_proxy.ResponseCallback {
@@ -320,8 +283,8 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 			return false, errors.Wrap(err, "response is nil")
 		}
 		var validatorKey *config.ValidatorKey
-		if b.cfg.ValidatorKeys != nil {
-			validatorKey = b.cfg.ValidatorKeys[beacon_common.ValidatorIndex(blockBlobResponse.Block.ProposerIndex)]
+		if b.ValidatorKeys != nil {
+			validatorKey = b.ValidatorKeys[beacon_common.ValidatorIndex(blockBlobResponse.Block.ProposerIndex)]
 		}
 		logrus.WithFields(logrus.Fields{
 			"proxy_id":               id,

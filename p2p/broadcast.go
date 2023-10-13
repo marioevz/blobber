@@ -67,7 +67,7 @@ func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, []byte, error) {
 	return b, s.Sum(nil)[:20], nil
 }
 
-func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
+func (p *TestPeer) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
 	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
 	defer cancel()
 	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
@@ -106,7 +106,7 @@ func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.Si
 	return topicHandle.Close()
 }
 
-func (p TestP2Ps) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
+func (p TestPeers) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
 	for _, p2p := range p {
 		if err := p2p.BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb); err != nil {
 			return err
@@ -115,7 +115,7 @@ func (p TestP2Ps) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.Si
 	return nil
 }
 
-func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar, subnet *uint64) error {
+func (p *TestPeer) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar, subnet *uint64) error {
 	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
 	defer cancel()
 	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
@@ -159,7 +159,7 @@ func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSi
 	return topicHandle.Close()
 }
 
-func (p TestP2Ps) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar, subnet *uint64) error {
+func (p TestPeers) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar, subnet *uint64) error {
 	for _, p2p := range p {
 		if err := p2p.BroadcastSignedBlobSidecar(signedBlobSidecar, subnet); err != nil {
 			return err
