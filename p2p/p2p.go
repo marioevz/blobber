@@ -3,10 +3,11 @@ package p2p
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/marioevz/blobber/common"
@@ -32,6 +33,7 @@ import (
 )
 
 var sszNetworkEncoder = encoder.SszNetworkEncoder{}
+var testP2PCounter = atomic.Uint64{}
 
 type Goodbye = primitives.SSZUint64
 type PingData = primitives.SSZUint64
@@ -45,7 +47,36 @@ const (
 
 const pubsubQueueSize = 600
 
+type TestP2PID uint64
+
+func (id TestP2PID) String() string {
+	return fmt.Sprintf("%d", id)
+}
+
+func (id TestP2PID) Keys() (crypto.PrivKey, crypto.PubKey) {
+	// Private keys are deterministic for testing purposes.
+	privKeyBytes := make([]byte, 32)
+	copy(privKeyBytes[:], []byte("blobber"))
+	binary.BigEndian.PutUint64(privKeyBytes[24:], uint64(id))
+	priv, err := crypto.UnmarshalSecp256k1PrivateKey(privKeyBytes)
+	if err != nil {
+		panic(err)
+	}
+	pub := priv.GetPublic()
+	return priv, pub
+}
+
+func (id TestP2PID) PeerID() string {
+	priv, _ := id.Keys()
+	peerID, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		panic(err)
+	}
+	return peerID.String()
+}
+
 type TestP2P struct {
+	ID         TestP2PID
 	Host       host.Host
 	PubSub     *pubsub.PubSub
 	PrivateKey crypto.PrivKey
@@ -105,11 +136,9 @@ func NewTestP2P(ctx context.Context, ip net.IP, port int64, chainState *common.S
 		return nil, errors.New("chain state cannot be nil")
 	}
 
-	// Generate a new private key pair for this host.
-	priv, pub, err := crypto.GenerateSecp256k1Key(rand.Reader)
-	if err != nil {
-		return nil, err
-	}
+	// Get the ID of this node.
+	id := TestP2PID(testP2PCounter.Add(1))
+	priv, pub := id.Keys()
 
 	libp2pOptions := []libp2p.Option{
 		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/%s/tcp/%d", ip.String(), port)),
@@ -150,6 +179,7 @@ func NewTestP2P(ctx context.Context, ip net.IP, port int64, chainState *common.S
 
 	ctx, cancel := context.WithCancel(ctx)
 	testP2P := &TestP2P{
+		ID:         id,
 		Host:       h,
 		PubSub:     ps,
 		PrivateKey: priv,
@@ -194,6 +224,7 @@ func (p *TestP2P) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 	// Open stream
 	peerInfo := p.Host.Peerstore().PeerInfo(peer)
 	logrus.WithFields(logrus.Fields{
+		"id":   p.ID,
 		"peer": peerInfo.ID.String(),
 	}).Debug("Opening stream")
 	s, err := p.Host.NewStream(ctx, peer, StatusProtocolID)
@@ -205,6 +236,7 @@ func (p *TestP2P) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 	p.state.Lock()
 	defer p.state.Unlock()
 	logrus.WithFields(logrus.Fields{
+		"id":              p.ID,
 		"protocol":        s.Protocol(),
 		"peer":            s.Conn().RemotePeer().String(),
 		"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
@@ -275,6 +307,7 @@ func (p *TestP2P) SetupStreams() error {
 		}
 		// Log received data
 		logrus.WithFields(logrus.Fields{
+			"id":              p.ID,
 			"protocol":        s.Protocol(),
 			"peer":            s.Conn().RemotePeer().String(),
 			"fork_digest":     fmt.Sprintf("%x", out.ForkDigest),
@@ -290,6 +323,7 @@ func (p *TestP2P) SetupStreams() error {
 
 		// Log received data
 		logrus.WithFields(logrus.Fields{
+			"id":              p.ID,
 			"protocol":        s.Protocol(),
 			"peer":            s.Conn().RemotePeer().String(),
 			"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
@@ -326,6 +360,7 @@ func (p *TestP2P) SetupStreams() error {
 		}
 		// Log received data
 		logrus.WithFields(logrus.Fields{
+			"id":       p.ID,
 			"protocol": s.Protocol(),
 			"peer":     s.Conn().RemotePeer().String(),
 			"reason":   fmt.Sprintf("%d", out),
@@ -353,6 +388,7 @@ func (p *TestP2P) SetupStreams() error {
 	// Ping
 	p.Host.SetStreamHandler(PingProtocolID, func(s network.Stream) {
 		logrus.WithFields(logrus.Fields{
+			"id":       p.ID,
 			"protocol": s.Protocol(),
 			"peer":     s.Conn().RemotePeer().String(),
 		}).Debug("Got a new stream")
@@ -364,6 +400,7 @@ func (p *TestP2P) SetupStreams() error {
 		}
 		// Log received data
 		logrus.WithFields(logrus.Fields{
+			"id":        p.ID,
 			"protocol":  s.Protocol(),
 			"peer":      s.Conn().RemotePeer().String(),
 			"ping_data": fmt.Sprintf("%d", out),
@@ -390,6 +427,7 @@ func (p *TestP2P) SetupStreams() error {
 	// MetaData
 	p.Host.SetStreamHandler(MetaDataProtocolID, func(s network.Stream) {
 		logrus.WithFields(logrus.Fields{
+			"id":       p.ID,
 			"protocol": s.Protocol(),
 			"peer":     s.Conn().RemotePeer().String(),
 		}).Debug("Got a new stream")

@@ -183,7 +183,7 @@ func (b *Blobber) getTestP2P(count int) (p2p.TestP2Ps, error) {
 	var testP2Ps p2p.TestP2Ps
 
 	if b.lastTestP2P != nil {
-		if b.testP2PUses >= b.cfg.MaxDevP2PSessionReuses || len(b.lastTestP2P) != count {
+		if (b.cfg.MaxDevP2PSessionReuses > 0 && b.testP2PUses >= b.cfg.MaxDevP2PSessionReuses) || len(b.lastTestP2P) != count {
 			// Close the last one
 			b.lastTestP2P.Close()
 			b.lastTestP2P = nil

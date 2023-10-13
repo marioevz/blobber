@@ -57,6 +57,7 @@ func main() {
 		slotActionJson           string
 		slotActionFrequency      int
 		validatorProxyPortStart  int
+		maxDevP2PSessionReuses   int
 	)
 
 	flag.Var(
@@ -105,6 +106,12 @@ func main() {
 		"slot-action-frequency",
 		1,
 		"Frequency of slot actions in slots. 1 means execute every slot, 2 means execute every other slot, etc.",
+	)
+	flag.IntVar(
+		&maxDevP2PSessionReuses,
+		"max-dev-p2p-session-reuses",
+		0,
+		"Maximum number of times to reuse a DevP2P session, which results in a new PeerID. 0 means always use the same session.",
 	)
 	flag.StringVar(
 		&logLevel,
@@ -174,6 +181,7 @@ func main() {
 		config.WithValidatorKeysListFromFile(validatorKeyFilePath),
 		config.WithProxiesPortStart(validatorProxyPortStart),
 		config.WithSlotActionFrequency(uint64(slotActionFrequency)),
+		config.WithMaxDevP2PSessionReuses(maxDevP2PSessionReuses),
 		config.WithLogLevel(logLevel),
 	}
 
