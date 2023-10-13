@@ -62,7 +62,7 @@ func (id TestP2PID) Keys() (crypto.PrivKey, crypto.PubKey) {
 	// Private keys are deterministic for testing purposes.
 	privKeyBytes := make([]byte, 32)
 	copy(privKeyBytes[:], []byte("blobber"))
-	binary.BigEndian.PutUint64(privKeyBytes[16:24], uint64(instanceID))
+	binary.BigEndian.PutUint64(privKeyBytes[16:24], instanceID)
 	binary.BigEndian.PutUint64(privKeyBytes[24:], uint64(id))
 	priv, err := crypto.UnmarshalSecp256k1PrivateKey(privKeyBytes)
 	if err != nil {
