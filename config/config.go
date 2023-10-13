@@ -243,6 +243,6 @@ func WithAlwaysErrorValidatorResponse() Option {
 			cfg.AlwaysErrorValidatorResponse = true
 			return nil
 		},
-		description: fmt.Sprintf("WithAlwaysErrorValidatorResponse()"),
+		description: "WithAlwaysErrorValidatorResponse()",
 	}
 }
