@@ -19,8 +19,9 @@ type ValidatorProxy struct {
 	host string
 	port int
 
-	id     int
-	target *url.URL
+	id          int
+	target      *url.URL
+	alwaysError bool
 
 	srv    *http.Server
 	cancel context.CancelFunc
@@ -35,10 +36,13 @@ func NewProxy(
 	port int,
 	destination string,
 	responseCallbacks map[string]ResponseCallback,
+	alwaysErrorResponse bool,
 ) (*ValidatorProxy, error) {
 	proxy := &ValidatorProxy{
 		host: host,
 		port: port,
+
+		alwaysError: alwaysErrorResponse,
 	}
 
 	router := mux.NewRouter()
@@ -51,7 +55,7 @@ func NewProxy(
 
 	reverseProxy := httputil.NewSingleHostReverseProxy(proxy.target)
 	for method, callback := range responseCallbacks {
-		router.HandleFunc(method, proxyHandler(proxy.target, reverseProxy, callback))
+		router.HandleFunc(method, proxy.proxyHandler(reverseProxy, callback))
 	}
 	router.PathPrefix("/").Handler(reverseProxy)
 
@@ -83,7 +87,7 @@ func (p *ValidatorProxy) Address() string {
 	return fmt.Sprintf("http://%s:%d", p.host, p.port)
 }
 
-func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallback) func(http.ResponseWriter, *http.Request) {
+func (v *ValidatorProxy) proxyHandler(p *httputil.ReverseProxy, callback ResponseCallback) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// we need to buffer the body if we want to read it here and send it
 		// in the request.
@@ -96,7 +100,7 @@ func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallb
 		// you can reassign the body if you need to parse it as multipart
 		r.Body = io.NopCloser(bytes.NewReader(body))
 
-		fullUrl := url.JoinPath(r.URL.Path)
+		fullUrl := v.target.JoinPath(r.URL.Path)
 		proxyReq, err := http.NewRequest(r.Method, fullUrl.String(), bytes.NewReader(body))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -152,6 +156,10 @@ func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallb
 
 		if override, err := callback(r, modifiedResp); err != nil {
 			logrus.WithError(err).Error("Could not execute callback, returning response to validator client")
+			if v.alwaysError {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		} else if override {
 			logrus.WithFields(logrus.Fields{
 				"method": r.Method,

@@ -132,7 +132,9 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_pro
 		map[string]validator_proxy.ResponseCallback{
 			"/eth/v2/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 2),
 			"/eth/v3/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 3),
-		})
+		},
+		b.cfg.AlwaysErrorValidatorResponse,
+	)
 	if err != nil {
 		panic(err)
 	}

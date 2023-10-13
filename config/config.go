@@ -14,17 +14,18 @@ import (
 type Config struct {
 	sync.Mutex
 
-	ID                     int
-	Port                   int
-	ProxiesPortStart       int
-	Host                   string
-	Spec                   *beacon.Spec
-	ExternalIP             net.IP
-	BeaconGenesisTime      beacon.Timestamp
-	GenesisValidatorsRoot  tree.Root
-	ValidatorKeys          map[beacon.ValidatorIndex]*ValidatorKey
-	ValidatorKeysList      []*ValidatorKey
-	MaxDevP2PSessionReuses int
+	ID                           int
+	Port                         int
+	ProxiesPortStart             int
+	Host                         string
+	Spec                         *beacon.Spec
+	ExternalIP                   net.IP
+	BeaconGenesisTime            beacon.Timestamp
+	GenesisValidatorsRoot        tree.Root
+	ValidatorKeys                map[beacon.ValidatorIndex]*ValidatorKey
+	ValidatorKeysList            []*ValidatorKey
+	MaxDevP2PSessionReuses       int
+	AlwaysErrorValidatorResponse bool
 
 	SlotAction          slot_actions.SlotAction
 	SlotActionFrequency uint64
@@ -231,5 +232,17 @@ func WithSlotActionFrequency(freq uint64) Option {
 			return nil
 		},
 		description: fmt.Sprintf("WithSlotActionFrequency(%d)", freq),
+	}
+}
+
+func WithAlwaysErrorValidatorResponse() Option {
+	return Option{
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.AlwaysErrorValidatorResponse = true
+			return nil
+		},
+		description: fmt.Sprintf("WithAlwaysErrorValidatorResponse()"),
 	}
 }
