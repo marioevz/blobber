@@ -28,6 +28,7 @@ func TestTypesEncoding(t *testing.T) {
 }
 
 func TestDeterministicPeerIDs(t *testing.T) {
+	// Default blobber ID: 0
 	for _, s := range []struct {
 		id        p2p.TestP2PID
 		expPeerID string
@@ -51,6 +52,41 @@ func TestDeterministicPeerIDs(t *testing.T) {
 		{
 			id:        p2p.TestP2PID(5),
 			expPeerID: "16Uiu2HAmTUnRa3oDa7K1psWS21qxJJfC1uzmHxnxsF3Hrfv4H9R2",
+		},
+	} {
+		t.Run(s.expPeerID, func(t *testing.T) {
+			peerID := s.id.PeerID()
+			if peerID != s.expPeerID {
+				t.Fatalf("expected peer ID %s, got %s", s.expPeerID, peerID)
+			}
+		})
+	}
+
+	// Change blobber ID: 1
+	p2p.SetInstanceID(1)
+	for _, s := range []struct {
+		id        p2p.TestP2PID
+		expPeerID string
+	}{
+		{
+			id:        p2p.TestP2PID(1),
+			expPeerID: "16Uiu2HAmQoEwGBgsACp67cCAXNjCQBkHRVqtwBK2Sq1jcsyc154U",
+		},
+		{
+			id:        p2p.TestP2PID(2),
+			expPeerID: "16Uiu2HAmKfnranVvseqy1BYDfbXbMs2FuYKbbf6hL3r77CcWTwMH",
+		},
+		{
+			id:        p2p.TestP2PID(3),
+			expPeerID: "16Uiu2HAmKWFFj9a2JDBR595rFyKDZEXer5PppgkXNG5ESGCXoA8m",
+		},
+		{
+			id:        p2p.TestP2PID(4),
+			expPeerID: "16Uiu2HAm4ebhKMsRLTUmJ5REdXjPWpZ69JmUsMKjn9MhTNAU3yve",
+		},
+		{
+			id:        p2p.TestP2PID(5),
+			expPeerID: "16Uiu2HAm2BjMuoccupkyzif1rBVv1wMXdV7fKTRh2UFgceApuhei",
 		},
 	} {
 		t.Run(s.expPeerID, func(t *testing.T) {

@@ -34,6 +34,7 @@ import (
 
 var sszNetworkEncoder = encoder.SszNetworkEncoder{}
 var testP2PCounter = atomic.Uint64{}
+var instanceID = uint64(0)
 
 type Goodbye = primitives.SSZUint64
 type PingData = primitives.SSZUint64
@@ -47,6 +48,10 @@ const (
 
 const pubsubQueueSize = 600
 
+func SetInstanceID(id uint64) {
+	instanceID = id
+}
+
 type TestP2PID uint64
 
 func (id TestP2PID) String() string {
@@ -57,6 +62,7 @@ func (id TestP2PID) Keys() (crypto.PrivKey, crypto.PubKey) {
 	// Private keys are deterministic for testing purposes.
 	privKeyBytes := make([]byte, 32)
 	copy(privKeyBytes[:], []byte("blobber"))
+	binary.BigEndian.PutUint64(privKeyBytes[16:24], uint64(instanceID))
 	binary.BigEndian.PutUint64(privKeyBytes[24:], uint64(id))
 	priv, err := crypto.UnmarshalSecp256k1PrivateKey(privKeyBytes)
 	if err != nil {
