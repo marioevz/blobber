@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/marioevz/blobber/p2p"
 	"github.com/marioevz/blobber/slot_actions"
 	beacon "github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/ztyp/tree"
@@ -14,7 +15,7 @@ import (
 type Config struct {
 	sync.Mutex
 
-	ID                           int
+	ID                           uint64
 	Port                         int
 	ProxiesPortStart             int
 	Host                         string
@@ -49,11 +50,12 @@ func (o Option) MarshalText() ([]byte, error) {
 	return []byte(o.description), nil
 }
 
-func WithID(id int) Option {
+func WithID(id uint64) Option {
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()
 			defer cfg.Unlock()
+			p2p.SetInstanceID(id)
 			cfg.ID = id
 			return nil
 		},

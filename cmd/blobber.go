@@ -58,6 +58,7 @@ func main() {
 		slotActionFrequency      int
 		validatorProxyPortStart  int
 		maxDevP2PSessionReuses   int
+		blobberID                uint64
 	)
 
 	flag.Var(
@@ -112,6 +113,12 @@ func main() {
 		"max-dev-p2p-session-reuses",
 		0,
 		"Maximum number of times to reuse a DevP2P session, which results in a new PeerID. 0 means always use the same session.",
+	)
+	flag.Uint64Var(
+		&blobberID,
+		"id",
+		0,
+		"Sets the blobber ID for this instance, it affects the PeerIDs that will be generated during runtime.",
 	)
 	flag.StringVar(
 		&logLevel,
@@ -175,6 +182,7 @@ func main() {
 	blobberOpts := []config.Option{
 		config.WithHost(hostIP),
 		config.WithExternalIP(net.ParseIP(externalIP)),
+		config.WithID(blobberID),
 		config.WithSpec(beaconClients[0].Config.Spec),
 		config.WithBeaconGenesisTime(*beaconClients[0].Config.GenesisTime),
 		config.WithGenesisValidatorsRoot(*beaconClients[0].Config.GenesisValidatorsRoot),
