@@ -40,7 +40,7 @@ func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, o
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return errors.Wrap(ctx.Err(), "topic list of peers was always empty")
 		case <-time.After(1 * time.Millisecond):
 		}
 	}
@@ -92,6 +92,7 @@ func (p *TestP2P) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.Si
 		return errors.Wrap(err, "failed to get block hash tree root")
 	}
 	logrus.WithFields(logrus.Fields{
+		"id":         p.ID,
 		"topic":      topic,
 		"block_root": fmt.Sprintf("%x", blockRoot),
 		"slot":       signedBeaconBlockDeneb.Block.Slot,
@@ -142,6 +143,7 @@ func (p *TestP2P) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSi
 		return errors.Wrap(err, "failed to join topic")
 	}
 	logrus.WithFields(logrus.Fields{
+		"id":             p.ID,
 		"topic":          topic,
 		"block_root":     fmt.Sprintf("%x", signedBlobSidecar.Message.BlockRoot),
 		"index":          signedBlobSidecar.Message.Index,
