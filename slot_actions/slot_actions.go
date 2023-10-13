@@ -18,9 +18,9 @@ import (
 )
 
 type SlotAction interface {
-	GetTestP2PCount() int
+	GetTestPeerCount() int
 	Execute(
-		testP2Ps p2p.TestP2Ps,
+		testPeers p2p.TestPeers,
 		beaconBlock *eth.BeaconBlockDeneb,
 		beaconBlockDomain beacon_common.BLSDomain,
 		blobSidecars []*eth.BlobSidecar,
@@ -118,13 +118,13 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 
 type Default struct{}
 
-func (s Default) GetTestP2PCount() int {
+func (s Default) GetTestPeerCount() int {
 	// By default we only create 1 test p2p and it's connected to all peers
 	return 1
 }
 
 func (s Default) Execute(
-	testP2Ps p2p.TestP2Ps,
+	testPeers p2p.TestPeers,
 	beaconBlock *eth.BeaconBlockDeneb,
 	beaconBlockDomain beacon_common.BLSDomain,
 	blobSidecars []*eth.BlobSidecar,
@@ -142,13 +142,13 @@ func (s Default) Execute(
 	}
 
 	// Broadcast the block
-	if err := testP2Ps.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+	if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
 	// Broadcast the blobs
 	for _, signedBlob := range signedBlobs {
-		if err := testP2Ps.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+		if err := testPeers.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 		}
 	}
@@ -161,7 +161,7 @@ type BroadcastBlobsBeforeBlock struct {
 }
 
 func (s BroadcastBlobsBeforeBlock) Execute(
-	testP2Ps p2p.TestP2Ps,
+	testPeers p2p.TestPeers,
 	beaconBlock *eth.BeaconBlockDeneb,
 	beaconBlockDomain beacon_common.BLSDomain,
 	blobSidecars []*eth.BlobSidecar,
@@ -180,13 +180,13 @@ func (s BroadcastBlobsBeforeBlock) Execute(
 
 	// Broadcast the blobs
 	for _, signedBlob := range signedBlobs {
-		if err := testP2Ps.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+		if err := testPeers.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 		}
 	}
 
 	// Broadcast the block
-	if err := testP2Ps.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+	if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
@@ -199,7 +199,7 @@ type BlobGossipDelay struct {
 }
 
 func (s BlobGossipDelay) Execute(
-	testP2Ps p2p.TestP2Ps,
+	testPeers p2p.TestPeers,
 	beaconBlock *eth.BeaconBlockDeneb,
 	beaconBlockDomain beacon_common.BLSDomain,
 	blobSidecars []*eth.BlobSidecar,
@@ -217,7 +217,7 @@ func (s BlobGossipDelay) Execute(
 	}
 
 	// Broadcast the block
-	if err := testP2Ps.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+	if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
@@ -226,7 +226,7 @@ func (s BlobGossipDelay) Execute(
 
 	// Broadcast the blobs
 	for _, signedBlob := range signedBlobs {
-		if err := testP2Ps.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+		if err := testPeers.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 		}
 	}
@@ -261,7 +261,7 @@ func FillSidecarWithRandomBlob(sidecar *eth.BlobSidecar) error {
 }
 
 func (s ExtraBlobs) Execute(
-	testP2Ps p2p.TestP2Ps,
+	testPeers p2p.TestPeers,
 	beaconBlock *eth.BeaconBlockDeneb,
 	beaconBlockDomain beacon_common.BLSDomain,
 	blobSidecars []*eth.BlobSidecar,
@@ -346,14 +346,14 @@ func (s ExtraBlobs) Execute(
 
 	if s.BroadcastBlockFirst {
 		// Broadcast the block
-		if err := testP2Ps.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+		if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 		}
 	}
 
 	if s.BroadcastExtraBlobFirst {
 		// Broadcast the extra blob
-		if err := testP2Ps.BroadcastSignedBlobSidecar(signedExtraBlob, nil); err != nil {
+		if err := testPeers.BroadcastSignedBlobSidecar(signedExtraBlob, nil); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast extra signed blob sidecar")
 		}
 
@@ -363,7 +363,7 @@ func (s ExtraBlobs) Execute(
 
 	// Broadcast the correct blobs
 	for _, signedBlob := range signedBlobs {
-		if err := testP2Ps.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+		if err := testPeers.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 		}
 	}
@@ -373,14 +373,14 @@ func (s ExtraBlobs) Execute(
 		time.Sleep(time.Duration(s.DelayMilliseconds) * time.Millisecond)
 
 		// Broadcast the extra blob
-		if err := testP2Ps.BroadcastSignedBlobSidecar(signedExtraBlob, nil); err != nil {
+		if err := testPeers.BroadcastSignedBlobSidecar(signedExtraBlob, nil); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast extra signed blob sidecar")
 		}
 	}
 
 	if !s.BroadcastBlockFirst {
 		// Broadcast the block
-		if err := testP2Ps.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+		if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 		}
 	}
@@ -392,21 +392,21 @@ type ConflictingBlobs struct {
 	Default
 }
 
-func (s ConflictingBlobs) GetTestP2PCount() int {
+func (s ConflictingBlobs) GetTestPeerCount() int {
 	// We are going to send two conflicting blobs through two different test p2p connections
 	return 2
 }
 
 func (s ConflictingBlobs) Execute(
-	testP2Ps p2p.TestP2Ps,
+	testPeers p2p.TestPeers,
 	beaconBlock *eth.BeaconBlockDeneb,
 	beaconBlockDomain beacon_common.BLSDomain,
 	blobSidecars []*eth.BlobSidecar,
 	blobSidecarDomain beacon_common.BLSDomain,
 	proposerKey *[32]byte,
 ) (bool, error) {
-	if len(testP2Ps) != 2 {
-		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testP2Ps))
+	if len(testPeers) != 2 {
+		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
 	}
 	if len(blobSidecars) < 1 {
 		return false, fmt.Errorf("expected at least 1 blob sidecar, got %d", len(blobSidecars))
@@ -458,7 +458,7 @@ func (s ConflictingBlobs) Execute(
 	go func() {
 		defer wg.Done()
 		for _, signedBlob := range signedBlobs {
-			if err := testP2Ps[0].BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+			if err := testPeers[0].BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
 				errs <- err
 				return
 			}
@@ -469,7 +469,7 @@ func (s ConflictingBlobs) Execute(
 	go func() {
 		defer wg.Done()
 		for _, signedBlob := range secondBlobSidecars {
-			if err := testP2Ps[1].BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+			if err := testPeers[1].BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
 				errs <- err
 				return
 			}
@@ -485,7 +485,7 @@ func (s ConflictingBlobs) Execute(
 	}
 
 	// Broadcast the block
-	if err := testP2Ps.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+	if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 

@@ -15,6 +15,8 @@ import (
 type Config struct {
 	sync.Mutex
 
+	*p2p.TestP2P
+
 	ID                           uint64
 	Port                         int
 	ProxiesPortStart             int
@@ -25,7 +27,6 @@ type Config struct {
 	GenesisValidatorsRoot        tree.Root
 	ValidatorKeys                map[beacon.ValidatorIndex]*ValidatorKey
 	ValidatorKeysList            []*ValidatorKey
-	MaxDevP2PSessionReuses       int
 	AlwaysErrorValidatorResponse bool
 
 	SlotAction          slot_actions.SlotAction
@@ -55,8 +56,8 @@ func WithID(id uint64) Option {
 		apply: func(cfg *Config) error {
 			cfg.Lock()
 			defer cfg.Unlock()
-			p2p.SetInstanceID(id)
 			cfg.ID = id
+			cfg.TestP2P.InstanceID = id
 			return nil
 		},
 		description: fmt.Sprintf("WithID(%d)", id),
@@ -81,6 +82,7 @@ func WithExternalIP(ip net.IP) Option {
 			cfg.Lock()
 			defer cfg.Unlock()
 			cfg.ExternalIP = ip
+			cfg.TestP2P.ExternalIP = ip
 			return nil
 		},
 		description: fmt.Sprintf("WithExternalIP(%s)", ip),
