@@ -14,6 +14,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/protolambda/bls12-381-util v0.0.0-20220416220906-d8552aa452c7
 	github.com/protolambda/eth2api v0.0.0-20230316214135-5f8afbd6d05d
+	github.com/protolambda/go-keystorev4 v0.0.0-20211007151826-f20444f6d564
 	github.com/protolambda/zrnt v0.30.0
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/fastssz v0.0.0-20221107182844-78142813af44

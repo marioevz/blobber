@@ -54,6 +54,7 @@ func main() {
 		clientInitTimeoutSeconds int
 		logLevel                 string
 		validatorKeyFilePath     string
+		validatorKeyFolderPath   string
 		slotActionJson           string
 		slotActionFrequency      int
 		validatorProxyPortStart  int
@@ -83,6 +84,12 @@ func main() {
 		"validator-key-file",
 		"",
 		"Path to validator key file: List of validator keys, one per line in hex format",
+	)
+	flag.StringVar(
+		&validatorKeyFolderPath,
+		"validator-key-folder",
+		"",
+		"Path to validator key folder: Load keys from a folder that contains a 'secrets' and 'keys' subdirectories",
 	)
 	flag.IntVar(
 		&clientInitTimeoutSeconds,
@@ -186,11 +193,20 @@ func main() {
 		config.WithSpec(beaconClients[0].Config.Spec),
 		config.WithBeaconGenesisTime(*beaconClients[0].Config.GenesisTime),
 		config.WithGenesisValidatorsRoot(*beaconClients[0].Config.GenesisValidatorsRoot),
-		config.WithValidatorKeysListFromFile(validatorKeyFilePath),
 		config.WithProxiesPortStart(validatorProxyPortStart),
 		config.WithSlotActionFrequency(uint64(slotActionFrequency)),
 		config.WithMaxDevP2PSessionReuses(maxDevP2PSessionReuses),
 		config.WithLogLevel(logLevel),
+	}
+
+	if validatorKeyFilePath != "" && validatorKeyFolderPath != "" {
+		fatalf("cannot specify both validator-key-file and validator-key-folder")
+	}
+
+	if validatorKeyFilePath != "" {
+		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFile(validatorKeyFilePath))
+	} else if validatorKeyFolderPath != "" {
+		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFolder(validatorKeyFolderPath))
 	}
 
 	if slotActionJson != "" {
