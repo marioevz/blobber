@@ -215,6 +215,22 @@ func WithValidatorKeysListFromFile(path string) Option {
 	}
 }
 
+func WithValidatorKeysListFromFolder(path string) Option {
+	return Option{
+		apply: func(cfg *Config) error {
+			vk, err := KeyListFromFolder(path)
+			if err != nil {
+				return err
+			}
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.ValidatorKeysList = vk
+			return nil
+		},
+		description: fmt.Sprintf("WithValidatorKeysListFromFolder(%s)", path),
+	}
+}
+
 func WithSlotAction(action slot_actions.SlotAction) Option {
 	return Option{
 		apply: func(cfg *Config) error {
