@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	blsu "github.com/protolambda/bls12-381-util"
 	keystore "github.com/protolambda/go-keystorev4"
+	"github.com/sirupsen/logrus"
 )
 
 type ValidatorKey struct {
@@ -141,6 +142,11 @@ func KeyListFromFolder(pathStr string) ([]*ValidatorKey, error) {
 		if err := validatorKey.FillPubKey(); err != nil {
 			return nil, errors.Wrap(err, "failed to parse validator key")
 		}
+		logrus.WithFields(
+			logrus.Fields{
+				"ValidatorPubkey": hex.EncodeToString(validatorKey.ValidatorPubkey[:]),
+			},
+		).Info("Imported validator key to list")
 		validatorKeyList = append(validatorKeyList, validatorKey)
 	}
 	return validatorKeyList, nil
