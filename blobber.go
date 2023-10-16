@@ -91,6 +91,9 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 	if b.ExternalIP == nil {
 		return nil, fmt.Errorf("no external ip configured")
 	}
+	if b.BeaconPortStart == 0 {
+		b.BeaconPortStart = PortBeaconTCP
+	}
 
 	// Create the fork decoder
 	b.forkDecoder = beacon.NewForkDecoder(b.Spec, b.GenesisValidatorsRoot)

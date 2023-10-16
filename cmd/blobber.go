@@ -57,6 +57,7 @@ func main() {
 		validatorKeyFolderPath   string
 		slotActionJson           string
 		slotActionFrequency      int
+		beaconPortStart          int
 		validatorProxyPortStart  int
 		maxDevP2PSessionReuses   int
 		blobberID                uint64
@@ -96,6 +97,12 @@ func main() {
 		"client-init-timeout",
 		60,
 		"clients initialization wait timeout in seconds",
+	)
+	flag.IntVar(
+		&beaconPortStart,
+		"beacon-port-start",
+		9_000,
+		"Port number to start the beacon test p2p clients from. For each beacon node added, there will be one extra port used",
 	)
 	flag.IntVar(
 		&validatorProxyPortStart,
@@ -193,6 +200,7 @@ func main() {
 		config.WithSpec(beaconClients[0].Config.Spec),
 		config.WithBeaconGenesisTime(*beaconClients[0].Config.GenesisTime),
 		config.WithGenesisValidatorsRoot(*beaconClients[0].Config.GenesisValidatorsRoot),
+		config.WithBeaconPortStart(beaconPortStart),
 		config.WithProxiesPortStart(validatorProxyPortStart),
 		config.WithSlotActionFrequency(uint64(slotActionFrequency)),
 		config.WithMaxDevP2PSessionReuses(maxDevP2PSessionReuses),
