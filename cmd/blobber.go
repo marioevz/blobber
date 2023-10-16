@@ -102,7 +102,7 @@ func main() {
 		&beaconPortStart,
 		"beacon-port-start",
 		9_000,
-		"Port number to start the beacon test p2p clients from. For each beacon node added, there will be one extra port used",
+		"Port number to start the beacon gossip p2p listen port from. For each beacon node added, there will be one extra port used",
 	)
 	flag.IntVar(
 		&validatorProxyPortStart,
