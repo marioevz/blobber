@@ -267,6 +267,10 @@ func (p *TestPeer) Connect(ctx context.Context, peer *BeaconClientPeer) error {
 	if err != nil {
 		return errors.Wrap(err, "could not get peer address info")
 	}
+	if connectedness := p.Host.Network().Connectedness(peerAddrInfo.ID); connectedness == network.Connected {
+		// Already connected, nothing to do
+		return nil
+	}
 	if err := p.Host.Connect(p.ctx, *peerAddrInfo); err != nil {
 		return errors.Wrap(err, "could not connect to peer")
 	}
@@ -357,7 +361,16 @@ func (p *TestPeer) SetupStreams() error {
 	// Prepare stream responses for the basic Req/Resp protocols.
 
 	// Status
+	logrus.Debug("Setting up status handler")
 	p.Host.SetStreamHandler(StatusProtocolID, func(s network.Stream) {
+		defer func() {
+			logrus.Debug("Finished responding to status request")
+		}()
+		logrus.WithFields(logrus.Fields{
+			"id":       p.ID,
+			"protocol": s.Protocol(),
+			"peer":     s.Conn().RemotePeer().String(),
+		}).Debug("Got a new stream")
 		// Read the incoming message into the appropriate struct.
 		var out common.Status
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &out); err != nil {
@@ -410,7 +423,16 @@ func (p *TestPeer) SetupStreams() error {
 	})
 
 	// Goodbye
+	logrus.Debug("Setting up goodbye handler")
 	p.Host.SetStreamHandler(GoodbyeProtocolID, func(s network.Stream) {
+		defer func() {
+			logrus.Debug("Finished responding to goodbye request")
+		}()
+		logrus.WithFields(logrus.Fields{
+			"id":       p.ID,
+			"protocol": s.Protocol(),
+			"peer":     s.Conn().RemotePeer().String(),
+		}).Debug("Got a new stream")
 		// Read the incoming message into the appropriate struct.
 		var out Goodbye
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &out); err != nil {
@@ -445,7 +467,11 @@ func (p *TestPeer) SetupStreams() error {
 	})
 
 	// Ping
+	logrus.Debug("Setting up ping handler")
 	p.Host.SetStreamHandler(PingProtocolID, func(s network.Stream) {
+		defer func() {
+			logrus.Debug("Finished responding to ping request")
+		}()
 		logrus.WithFields(logrus.Fields{
 			"id":       p.ID,
 			"protocol": s.Protocol(),
@@ -484,7 +510,11 @@ func (p *TestPeer) SetupStreams() error {
 	})
 
 	// MetaData
+	logrus.Debug("Setting up metadata handler")
 	p.Host.SetStreamHandler(MetaDataProtocolID, func(s network.Stream) {
+		defer func() {
+			logrus.Debug("Finished responding to metadata request")
+		}()
 		logrus.WithFields(logrus.Fields{
 			"id":       p.ID,
 			"protocol": s.Protocol(),
