@@ -9,7 +9,7 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/libp2p/go-libp2p v0.27.8
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
-	github.com/marioevz/eth-clients v0.0.0-20231012191302-f85f98699640
+	github.com/marioevz/eth-clients v0.0.0-20231016180546-1aa64f26c3a1
 	github.com/multiformats/go-multiaddr v0.9.0
 	github.com/pkg/errors v0.9.1
 	github.com/protolambda/bls12-381-util v0.0.0-20220416220906-d8552aa452c7

@@ -116,19 +116,15 @@ func (b *Blobber) Close() {
 }
 
 func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_proxy.ValidatorProxy {
-	b.cls = append(b.cls, &p2p.BeaconClientPeer{
-		BeaconClient: cl,
-		TCPPort:      PortBeaconTCP,
-		UDPPort:      PortBeaconUDP,
-	})
+	b.cls = append(b.cls, &p2p.BeaconClientPeer{BeaconClient: cl})
 
-	beaconEndpoint := fmt.Sprintf("http://%s:%d", cl.GetIP(), cl.Config.BeaconAPIPort)
+	beaconAPIEndpoint := fmt.Sprintf("http://%s:%d", cl.GetHost(), cl.Config.BeaconAPIPort)
 	logrus.WithFields(logrus.Fields{
-		"beacon_endpoint": beaconEndpoint,
+		"beacon_endpoint": beaconAPIEndpoint,
 	}).Info("Adding proxy")
 	id := len(b.proxies)
 	port := b.ProxiesPortStart + id
-	proxy, err := validator_proxy.NewProxy(b.ctx, id, b.Host, port, beaconEndpoint,
+	proxy, err := validator_proxy.NewProxy(b.ctx, id, b.Host, port, beaconAPIEndpoint,
 		map[string]validator_proxy.ResponseCallback{
 			"/eth/v2/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 2),
 			"/eth/v3/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 3),
