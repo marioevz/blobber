@@ -46,10 +46,6 @@ const (
 
 const pubsubQueueSize = 600
 
-const (
-	PortBeaconTCP = 9000
-)
-
 type TestP2P struct {
 	InstanceID  uint64
 	peerCounter atomic.Uint64
@@ -61,6 +57,7 @@ type TestP2P struct {
 
 	// Config
 	ExternalIP             net.IP
+	BeaconPortStart        int64
 	MaxDevP2PSessionReuses int
 }
 
@@ -178,7 +175,7 @@ func (t *TestP2P) GetTestPeer(ctx context.Context, count int) (TestPeers, error)
 		// Generate a new one
 		testPeers = make(TestPeers, 0)
 		for i := 0; i < count; i++ {
-			testPeer, err := t.NewTestPeer(ctx, int64(PortBeaconTCP+i))
+			testPeer, err := t.NewTestPeer(ctx, t.BeaconPortStart+int64(i))
 			if err != nil {
 				// close the ones we actually created
 				testPeers.Close()

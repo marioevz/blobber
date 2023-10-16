@@ -101,6 +101,18 @@ func WithPort(port int) Option {
 	}
 }
 
+func WithBeaconPortStart(port int) Option {
+	return Option{
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.TestP2P.BeaconPortStart = int64(port)
+			return nil
+		},
+		description: fmt.Sprintf("WithBeaconPortStart(%d)", port),
+	}
+}
+
 func WithLogLevel(level string) Option {
 	return Option{
 		apply: func(_ *Config) error {
