@@ -408,9 +408,6 @@ func (s ConflictingBlobs) Execute(
 	if len(testPeers) != 2 {
 		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
 	}
-	if len(blobSidecars) < 1 {
-		return false, fmt.Errorf("expected at least 1 blob sidecar, got %d", len(blobSidecars))
-	}
 
 	// Sign block and blobs
 	signedBlock, err := SignBlock(beaconBlock, beaconBlockDomain, proposerKey)
@@ -423,8 +420,12 @@ func (s ConflictingBlobs) Execute(
 	}
 
 	// Generate the extra blob sidecar
+	blockRoot, err := beaconBlock.HashTreeRoot()
+	if err != nil {
+		return false, errors.Wrap(err, "failed to get block hash tree root")
+	}
 	conflictingBlobSidecar := &eth.BlobSidecar{
-		BlockRoot:       signedBlobs[0].Message.BlockRoot,
+		BlockRoot:       blockRoot[:],
 		Index:           0,
 		Slot:            beaconBlock.Slot,
 		BlockParentRoot: beaconBlock.ParentRoot[:],
@@ -441,11 +442,14 @@ func (s ConflictingBlobs) Execute(
 	}
 
 	// Create the second list of sidecars
-	secondBlobSidecars := make([]*eth.SignedBlobSidecar, len(signedBlobs))
+	secondBlobSidecarsLenght := len(signedBlobs)
+	if secondBlobSidecarsLenght == 0 {
+		secondBlobSidecarsLenght = 1
+	}
+	secondBlobSidecars := make([]*eth.SignedBlobSidecar, secondBlobSidecarsLenght)
+	secondBlobSidecars[0] = signedConflictingBlob
 	for i, signedBlobSidecar := range signedBlobs {
-		if i == 0 {
-			secondBlobSidecars[i] = signedConflictingBlob
-		} else {
+		if i > 0 {
 			secondBlobSidecars[i] = signedBlobSidecar
 		}
 	}
