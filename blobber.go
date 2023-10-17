@@ -115,10 +115,12 @@ func (b *Blobber) Close() {
 	}
 }
 
-func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient) *validator_proxy.ValidatorProxy {
+func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient, validatorProxy bool) *validator_proxy.ValidatorProxy {
 	b.cls = append(b.cls, &p2p.BeaconClientPeer{BeaconClient: cl})
-
-	beaconAPIEndpoint := fmt.Sprintf("http://%s:%d", cl.GetHost(), cl.Config.BeaconAPIPort)
+	if !validatorProxy {
+		return nil
+	}
+	beaconAPIEndpoint := cl.GetAddress()
 	logrus.WithFields(logrus.Fields{
 		"beacon_endpoint": beaconAPIEndpoint,
 	}).Info("Adding proxy")

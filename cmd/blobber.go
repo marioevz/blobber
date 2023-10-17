@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -49,6 +50,7 @@ func fatal(err error) {
 func main() {
 	var (
 		clEndpoints              arrayFlags
+		nonValidatingClEndpoints arrayFlags
 		externalIP               string
 		hostIP                   string
 		clientInitTimeoutSeconds int
@@ -66,7 +68,12 @@ func main() {
 	flag.Var(
 		&clEndpoints,
 		"cl",
-		"Consensus layer client endpoint",
+		"Consensus layer client endpoint that creates a validator proxy endpoint",
+	)
+	flag.Var(
+		&nonValidatingClEndpoints,
+		"cl-non-validating",
+		"Consensus layer client endpoint to add as a non-validating client: all messages are broadcast to it, but it's not expected to have valiadtor duties",
 	)
 	flag.StringVar(
 		&externalIP,
@@ -150,9 +157,17 @@ func main() {
 		fatalf("at least one consensus layer client endpoint is required")
 	}
 
-	beaconClients := make([]*beacon_client.BeaconClient, len(clEndpoints))
+	type beaconEndpoint struct {
+		BeaconClient *beacon_client.BeaconClient
+		Validator    bool
+	}
 
-	for i, clEndpoint := range clEndpoints {
+	beaconClients := make([]beaconEndpoint, len(clEndpoints)+len(nonValidatingClEndpoints))
+
+	var wg sync.WaitGroup
+
+	addBeaconClient := func(i int, clEndpoint string, validator bool) {
+		defer wg.Done()
 		// Configure an external CL
 		externalCl, err := clients.ExternalClientFromURL(clEndpoint, "cl")
 		if err != nil {
@@ -190,16 +205,29 @@ func main() {
 				err,
 			)
 		}
-		beaconClients[i] = bn
+		beaconClients[i] = beaconEndpoint{
+			BeaconClient: bn,
+			Validator:    validator,
+		}
 	}
+
+	for i, clEndpoint := range clEndpoints {
+		wg.Add(1)
+		go addBeaconClient(i, clEndpoint, true)
+	}
+	for i, clEndpoint := range nonValidatingClEndpoints {
+		wg.Add(1)
+		go addBeaconClient(i+len(clEndpoints), clEndpoint, false)
+	}
+	wg.Wait()
 
 	blobberOpts := []config.Option{
 		config.WithHost(hostIP),
 		config.WithExternalIP(net.ParseIP(externalIP)),
 		config.WithID(blobberID),
-		config.WithSpec(beaconClients[0].Config.Spec),
-		config.WithBeaconGenesisTime(*beaconClients[0].Config.GenesisTime),
-		config.WithGenesisValidatorsRoot(*beaconClients[0].Config.GenesisValidatorsRoot),
+		config.WithSpec(beaconClients[0].BeaconClient.Config.Spec),
+		config.WithBeaconGenesisTime(*beaconClients[0].BeaconClient.Config.GenesisTime),
+		config.WithGenesisValidatorsRoot(*beaconClients[0].BeaconClient.Config.GenesisValidatorsRoot),
 		config.WithBeaconPortStart(beaconPortStart),
 		config.WithProxiesPortStart(validatorProxyPortStart),
 		config.WithSlotActionFrequency(uint64(slotActionFrequency)),
@@ -231,7 +259,7 @@ func main() {
 	}
 
 	for _, bn := range beaconClients {
-		vp := b.AddBeaconClient(bn)
+		vp := b.AddBeaconClient(bn.BeaconClient, bn.Validator)
 		logrus.WithFields(
 			logrus.Fields{
 				"ip":   externalIP,
