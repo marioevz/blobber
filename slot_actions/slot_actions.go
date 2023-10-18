@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	math_rand "math/rand"
 	"sync"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"github.com/sirupsen/logrus"
 )
+
+const MAX_BLOBS_PER_BLOCK = 6
 
 type SlotAction interface {
 	GetTestPeerCount() int
@@ -390,11 +393,24 @@ func (s ExtraBlobs) Execute(
 
 type ConflictingBlobs struct {
 	Default
+	ConflictingBlobsCount       int  `json:"conflicting_blobs_count"`
+	RandomConflictingBlobsCount bool `json:"random_conflicting_blobs_count"`
+	AlternateBlobRecipients     bool `json:"alternate_blob_recipients"`
 }
 
 func (s ConflictingBlobs) GetTestPeerCount() int {
 	// We are going to send two conflicting blobs through two different test p2p connections
 	return 2
+}
+
+func (s ConflictingBlobs) GetConflictingBlobsCount() int {
+	if s.RandomConflictingBlobsCount {
+		return math_rand.Intn(MAX_BLOBS_PER_BLOCK-1) + 1
+	}
+	if s.ConflictingBlobsCount > 0 {
+		return s.ConflictingBlobsCount
+	}
+	return 1
 }
 
 func (s ConflictingBlobs) Execute(
@@ -419,67 +435,71 @@ func (s ConflictingBlobs) Execute(
 		return false, errors.Wrap(err, "failed to sign blobs")
 	}
 
-	// Generate the extra blob sidecar
+	// Generate the extra blob sidecars
 	blockRoot, err := beaconBlock.HashTreeRoot()
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get block hash tree root")
 	}
-	conflictingBlobSidecar := &eth.BlobSidecar{
-		BlockRoot:       blockRoot[:],
-		Index:           0,
-		Slot:            beaconBlock.Slot,
-		BlockParentRoot: beaconBlock.ParentRoot[:],
-		ProposerIndex:   beaconBlock.ProposerIndex,
-	}
 
-	if err := FillSidecarWithRandomBlob(conflictingBlobSidecar); err != nil {
-		return false, errors.Wrap(err, "failed to fill extra blob sidecar")
-	}
-	// Sign the blob
-	signedConflictingBlob, err := SignBlob(conflictingBlobSidecar, blobSidecarDomain, proposerKey)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to sign extra blob")
-	}
+	conflictingBlobsCount := s.GetConflictingBlobsCount()
 
 	// Create the second list of sidecars
-	secondBlobSidecarsLenght := len(signedBlobs)
-	if secondBlobSidecarsLenght == 0 {
-		secondBlobSidecarsLenght = 1
+	secondBlobSidecarsLength := len(signedBlobs)
+	if secondBlobSidecarsLength < int(conflictingBlobsCount) {
+		secondBlobSidecarsLength = int(conflictingBlobsCount)
 	}
-	secondBlobSidecars := make([]*eth.SignedBlobSidecar, secondBlobSidecarsLenght)
-	secondBlobSidecars[0] = signedConflictingBlob
-	for i, signedBlobSidecar := range signedBlobs {
-		if i > 0 {
-			secondBlobSidecars[i] = signedBlobSidecar
+	secondBlobSidecars := make([]*eth.SignedBlobSidecar, secondBlobSidecarsLength)
+
+	for i := 0; i < secondBlobSidecarsLength; i++ {
+		if i < conflictingBlobsCount {
+			conflictingBlobSidecar := &eth.BlobSidecar{
+				BlockRoot:       blockRoot[:],
+				Index:           uint64(i),
+				Slot:            beaconBlock.Slot,
+				BlockParentRoot: beaconBlock.ParentRoot[:],
+				ProposerIndex:   beaconBlock.ProposerIndex,
+			}
+
+			if err := FillSidecarWithRandomBlob(conflictingBlobSidecar); err != nil {
+				return false, errors.Wrap(err, "failed to fill extra blob sidecar")
+			}
+			// Sign the blob
+			secondBlobSidecars[i], err = SignBlob(conflictingBlobSidecar, blobSidecarDomain, proposerKey)
+			if err != nil {
+				return false, errors.Wrap(err, "failed to sign extra blob")
+			}
+		} else {
+			secondBlobSidecars[i] = signedBlobs[i]
 		}
 	}
 
 	wg := sync.WaitGroup{}
 	errs := make(chan error, 2)
-	wg.Add(2)
 
 	// Broadcast the first list of blobs
-	go func() {
+	broadcastBlobs := func(testPeer *p2p.TestPeer, signedBlobs []*eth.SignedBlobSidecar) {
 		defer wg.Done()
 		for _, signedBlob := range signedBlobs {
-			if err := testPeers[0].BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
+			if err := testPeer.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
 				errs <- err
 				return
 			}
 		}
-	}()
+	}
 
-	// Broadcast the second list of blobs
-	go func() {
-		defer wg.Done()
-		for _, signedBlob := range secondBlobSidecars {
-			if err := testPeers[1].BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
-				errs <- err
-				return
-			}
-		}
-	}()
+	changeOrder := false
+	if s.AlternateBlobRecipients {
+		changeOrder = beaconBlock.Slot%2 == 0
+	}
 
+	wg.Add(2)
+	if changeOrder {
+		go broadcastBlobs(testPeers[0], secondBlobSidecars)
+		go broadcastBlobs(testPeers[1], signedBlobs)
+	} else {
+		go broadcastBlobs(testPeers[0], signedBlobs)
+		go broadcastBlobs(testPeers[1], secondBlobSidecars)
+	}
 	wg.Wait()
 
 	select {
