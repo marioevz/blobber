@@ -16,6 +16,8 @@ FROM debian:bullseye-slim
 
 COPY --from=builder /build/cmd/blobber.bin /blobber.bin
 
+RUN apt-get update && apt-get install -y curl
+
 # Ensure the binary is executable
 RUN chmod +x /blobber.bin
 
