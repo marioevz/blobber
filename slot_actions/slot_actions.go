@@ -445,8 +445,8 @@ func (s ConflictingBlobs) Execute(
 
 	// Create the second list of sidecars
 	secondBlobSidecarsLength := len(signedBlobs)
-	if secondBlobSidecarsLength < int(conflictingBlobsCount) {
-		secondBlobSidecarsLength = int(conflictingBlobsCount)
+	if secondBlobSidecarsLength < conflictingBlobsCount {
+		secondBlobSidecarsLength = conflictingBlobsCount
 	}
 	secondBlobSidecars := make([]*eth.SignedBlobSidecar, secondBlobSidecarsLength)
 
