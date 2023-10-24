@@ -5,15 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	math_rand "math/rand"
-	"sync"
 	"time"
 
 	"github.com/marioevz/blobber/kzg"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/pkg/errors"
-	blsu "github.com/protolambda/bls12-381-util"
 	beacon_common "github.com/protolambda/zrnt/eth2/beacon/common"
-	"github.com/protolambda/ztyp/tree"
 	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"github.com/sirupsen/logrus"
 )
@@ -30,58 +27,6 @@ type SlotAction interface {
 		blobSidecarDomain beacon_common.BLSDomain,
 		proposerKey *[32]byte,
 	) (bool, error)
-}
-
-func SignBlock(block *eth.BeaconBlockDeneb, beaconBlockDomain beacon_common.BLSDomain, proposerKey *[32]byte) (*eth.SignedBeaconBlockDeneb, error) {
-	blockHTR, err := block.HashTreeRoot()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get block hash tree root")
-	}
-
-	signingRoot := beacon_common.ComputeSigningRoot(
-		tree.Root(blockHTR),
-		beaconBlockDomain,
-	)
-
-	sk := new(blsu.SecretKey)
-	sk.Deserialize(proposerKey)
-	signature := blsu.Sign(sk, signingRoot[:]).Serialize()
-	signedBlock := eth.SignedBeaconBlockDeneb{}
-	signedBlock.Block = block
-	signedBlock.Signature = signature[:]
-	return &signedBlock, nil
-}
-
-func SignBlob(blob *eth.BlobSidecar, blobSidecarDomain beacon_common.BLSDomain, proposerKey *[32]byte) (*eth.SignedBlobSidecar, error) {
-	blobHTR, err := blob.HashTreeRoot()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get block hash tree root")
-	}
-
-	signingRoot := beacon_common.ComputeSigningRoot(
-		tree.Root(blobHTR),
-		blobSidecarDomain,
-	)
-
-	sk := new(blsu.SecretKey)
-	sk.Deserialize(proposerKey)
-	signature := blsu.Sign(sk, signingRoot[:]).Serialize()
-	signedBlob := eth.SignedBlobSidecar{}
-	signedBlob.Message = blob
-	signedBlob.Signature = signature[:]
-	return &signedBlob, nil
-}
-
-func SignBlobs(blobs []*eth.BlobSidecar, blobSidecarDomain beacon_common.BLSDomain, proposerKey *[32]byte) ([]*eth.SignedBlobSidecar, error) {
-	signedBlobs := make([]*eth.SignedBlobSidecar, len(blobs))
-	for i, blob := range blobs {
-		signedBlob, err := SignBlob(blob, blobSidecarDomain, proposerKey)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to sign blob")
-		}
-		signedBlobs[i] = signedBlob
-	}
-	return signedBlobs, nil
 }
 
 func UnmarshallSlotAction(data []byte) (SlotAction, error) {
@@ -109,6 +54,8 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 		action = &ExtraBlobs{}
 	case "conflicting_blobs":
 		action = &ConflictingBlobs{}
+	case "swap_blobs":
+		action = &SwapBlobs{}
 	default:
 		return nil, fmt.Errorf("unknown slot action name: %s", actionNameObj.Name)
 	}
@@ -150,10 +97,8 @@ func (s Default) Execute(
 	}
 
 	// Broadcast the blobs
-	for _, signedBlob := range signedBlobs {
-		if err := testPeers.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
-			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
-		}
+	if err := testPeers.BroadcastSignedBlobSidecars(signedBlobs); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 	}
 
 	return true, nil
@@ -182,10 +127,8 @@ func (s BroadcastBlobsBeforeBlock) Execute(
 	}
 
 	// Broadcast the blobs
-	for _, signedBlob := range signedBlobs {
-		if err := testPeers.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
-			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
-		}
+	if err := testPeers.BroadcastSignedBlobSidecars(signedBlobs); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 	}
 
 	// Broadcast the block
@@ -228,10 +171,8 @@ func (s BlobGossipDelay) Execute(
 	time.Sleep(time.Duration(s.DelayMilliseconds) * time.Millisecond)
 
 	// Broadcast the blobs
-	for _, signedBlob := range signedBlobs {
-		if err := testPeers.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
-			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
-		}
+	if err := testPeers.BroadcastSignedBlobSidecars(signedBlobs); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 	}
 
 	return true, nil
@@ -365,10 +306,8 @@ func (s ExtraBlobs) Execute(
 	}
 
 	// Broadcast the correct blobs
-	for _, signedBlob := range signedBlobs {
-		if err := testPeers.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
-			return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
-		}
+	if err := testPeers.BroadcastSignedBlobSidecars(signedBlobs); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 	}
 
 	if !s.BroadcastExtraBlobFirst {
@@ -473,39 +412,120 @@ func (s ConflictingBlobs) Execute(
 		}
 	}
 
-	wg := sync.WaitGroup{}
-	errs := make(chan error, 2)
+	var signedBlobsBundles [][]*eth.SignedBlobSidecar
+	if s.AlternateBlobRecipients && (beaconBlock.Slot%2 == 0) {
+		signedBlobsBundles = [][]*eth.SignedBlobSidecar{secondBlobSidecars, signedBlobs}
+	} else {
+		signedBlobsBundles = [][]*eth.SignedBlobSidecar{signedBlobs, secondBlobSidecars}
+	}
+	if err := MultiPeerSignedBlobBroadcast(testPeers, signedBlobsBundles); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed blob sidecars")
+	}
 
-	// Broadcast the first list of blobs
-	broadcastBlobs := func(testPeer *p2p.TestPeer, signedBlobs []*eth.SignedBlobSidecar) {
-		defer wg.Done()
-		for _, signedBlob := range signedBlobs {
-			if err := testPeer.BroadcastSignedBlobSidecar(signedBlob, nil); err != nil {
-				errs <- err
-				return
+	// Broadcast the block
+	if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
+	}
+
+	return true, nil
+}
+
+// Send all correct blobs but swap the indexes of two blobs
+// Split network: send the correct blobs to one half of the peers and the swapped blobs to
+// the other half
+type SwapBlobs struct {
+	Default
+	SplitNetwork bool `json:"split_network"`
+}
+
+func (s SwapBlobs) GetTestPeerCount() int {
+	// We are going to send conflicting blobs if the network is split
+	if s.SplitNetwork {
+		return 2
+	}
+	return 1
+}
+
+func (s SwapBlobs) ModifyBlobs(blobSidecars []*eth.BlobSidecar) ([]*eth.BlobSidecar, error) {
+	modifiedBlobSidecars, err := CopyBlobs(blobSidecars)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to copy blobs")
+	}
+
+	if len(blobSidecars) > 0 {
+		// If we only have one blob, we can simply modify the index of this single blob
+		if len(blobSidecars) == 1 {
+			modifiedBlobSidecars[0].Index = 1
+		} else {
+			// Swap the indexes of two blobs
+			firstIndex := math_rand.Intn(len(blobSidecars))
+			secondIndex := math_rand.Intn(len(blobSidecars))
+			for firstIndex == secondIndex {
+				secondIndex = math_rand.Intn(len(blobSidecars))
 			}
+			modifiedBlobSidecars[firstIndex].Index = uint64(secondIndex)
+			modifiedBlobSidecars[secondIndex].Index = uint64(firstIndex)
+
+			// Swap the blobs (So they are sent in increased index order)
+			tmpBlob := modifiedBlobSidecars[firstIndex]
+			modifiedBlobSidecars[firstIndex] = modifiedBlobSidecars[secondIndex]
+			modifiedBlobSidecars[secondIndex] = tmpBlob
 		}
 	}
+	return modifiedBlobSidecars, nil
+}
 
-	changeOrder := false
-	if s.AlternateBlobRecipients {
-		changeOrder = beaconBlock.Slot%2 == 0
+func (s SwapBlobs) Execute(
+	testPeers p2p.TestPeers,
+	beaconBlock *eth.BeaconBlockDeneb,
+	beaconBlockDomain beacon_common.BLSDomain,
+	blobSidecars []*eth.BlobSidecar,
+	blobSidecarDomain beacon_common.BLSDomain,
+	proposerKey *[32]byte,
+) (bool, error) {
+	var (
+		signedBlock          *eth.SignedBeaconBlockDeneb
+		signedBlobs          []*eth.SignedBlobSidecar
+		signedModifiedBlobs  []*eth.SignedBlobSidecar
+		modifiedBlobSidecars []*eth.BlobSidecar
+		err                  error
+	)
+
+	if s.SplitNetwork && len(testPeers) != 2 {
+		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
 	}
 
-	wg.Add(2)
-	if changeOrder {
-		go broadcastBlobs(testPeers[0], secondBlobSidecars)
-		go broadcastBlobs(testPeers[1], signedBlobs)
+	// Modify the blobs
+	modifiedBlobSidecars, err = s.ModifyBlobs(blobSidecars)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to modify blobs")
+	}
+
+	// Sign block and blobs
+	signedBlock, err = SignBlock(beaconBlock, beaconBlockDomain, proposerKey)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to sign block")
+	}
+	if s.SplitNetwork {
+		signedBlobs, err = SignBlobs(blobSidecars, blobSidecarDomain, proposerKey)
+		if err != nil {
+			return false, errors.Wrap(err, "failed to sign blobs")
+		}
+	}
+	signedModifiedBlobs, err = SignBlobs(modifiedBlobSidecars, blobSidecarDomain, proposerKey)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to sign modified blobs")
+	}
+
+	// Broadcast the blobs first for the test to make sense
+	if s.SplitNetwork {
+		if err := MultiPeerSignedBlobBroadcast(testPeers, [][]*eth.SignedBlobSidecar{signedBlobs, signedModifiedBlobs}); err != nil {
+			return false, errors.Wrap(err, "failed to broadcast signed blob sidecars")
+		}
 	} else {
-		go broadcastBlobs(testPeers[0], signedBlobs)
-		go broadcastBlobs(testPeers[1], secondBlobSidecars)
-	}
-	wg.Wait()
-
-	select {
-	case err := <-errs:
-		return false, errors.Wrap(err, "failed to broadcast blob sidecars")
-	default:
+		if err := testPeers.BroadcastSignedBlobSidecars(signedModifiedBlobs); err != nil {
+			return false, errors.Wrap(err, "failed to broadcast signed blob sidecars")
+		}
 	}
 
 	// Broadcast the block
