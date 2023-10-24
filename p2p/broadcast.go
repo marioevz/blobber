@@ -91,14 +91,20 @@ func (p *TestPeer) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.S
 	if err != nil {
 		return errors.Wrap(err, "failed to get block hash tree root")
 	}
-	logrus.WithFields(logrus.Fields{
+	debugFields := logrus.Fields{
 		"id":         p.ID,
 		"topic":      topic,
 		"block_root": fmt.Sprintf("%x", blockRoot),
 		"slot":       signedBeaconBlockDeneb.Block.Slot,
 		"signature":  fmt.Sprintf("%x", signedBeaconBlockDeneb.Signature),
 		"message_id": fmt.Sprintf("%x", messageID),
-	}).Debug("Broadcasting signed beacon block deneb")
+	}
+
+	for i, blobKzg := range signedBeaconBlockDeneb.Block.Body.BlobKzgCommitments {
+		debugFields[fmt.Sprintf("blob_kzg_commitment_%d", i)] = fmt.Sprintf("%x", blobKzg)
+	}
+
+	logrus.WithFields(debugFields).Debug("Broadcasting signed beacon block deneb")
 
 	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
 		return errors.Wrap(err, "failed to publish topic")
@@ -159,9 +165,27 @@ func (p *TestPeer) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobS
 	return topicHandle.Close()
 }
 
+func (p *TestPeer) BroadcastSignedBlobSidecars(signedBlobSidecars []*eth.SignedBlobSidecar) error {
+	for _, signedBlobSidecar := range signedBlobSidecars {
+		if err := p.BroadcastSignedBlobSidecar(signedBlobSidecar, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p TestPeers) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar, subnet *uint64) error {
 	for _, p2p := range p {
 		if err := p2p.BroadcastSignedBlobSidecar(signedBlobSidecar, subnet); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p TestPeers) BroadcastSignedBlobSidecars(signedBlobSidecars []*eth.SignedBlobSidecar) error {
+	for _, p2p := range p {
+		if err := p2p.BroadcastSignedBlobSidecars(signedBlobSidecars); err != nil {
 			return err
 		}
 	}
