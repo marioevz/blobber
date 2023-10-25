@@ -18,6 +18,8 @@ import (
 const MAX_BLOBS_PER_BLOCK = 6
 
 type SlotAction interface {
+	Name() string
+	Fields() map[string]interface{}
 	GetTestPeerCount() int
 	Execute(
 		testPeers p2p.TestPeers,
@@ -68,6 +70,14 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 
 type Default struct{}
 
+func (s Default) Name() string {
+	return "Default"
+}
+
+func (s Default) Fields() map[string]interface{} {
+	return map[string]interface{}{}
+}
+
 func (s Default) GetTestPeerCount() int {
 	// By default we only create 1 test p2p and it's connected to all peers
 	return 1
@@ -108,6 +118,14 @@ type BroadcastBlobsBeforeBlock struct {
 	Default
 }
 
+func (s BroadcastBlobsBeforeBlock) Name() string {
+	return "Broadcast blobs before block"
+}
+
+func (s BroadcastBlobsBeforeBlock) Fields() map[string]interface{} {
+	return map[string]interface{}{}
+}
+
 func (s BroadcastBlobsBeforeBlock) Execute(
 	testPeers p2p.TestPeers,
 	beaconBlock *eth.BeaconBlockDeneb,
@@ -142,6 +160,16 @@ func (s BroadcastBlobsBeforeBlock) Execute(
 type BlobGossipDelay struct {
 	Default
 	DelayMilliseconds int `json:"delay_milliseconds"`
+}
+
+func (s BlobGossipDelay) Name() string {
+	return "Blob gossip delay"
+}
+
+func (s BlobGossipDelay) Fields() map[string]interface{} {
+	return map[string]interface{}{
+		"delay_milliseconds": s.DelayMilliseconds,
+	}
 }
 
 func (s BlobGossipDelay) Execute(
@@ -191,6 +219,22 @@ type ExtraBlobs struct {
 	DelayMilliseconds       int  `json:"delay_milliseconds"`
 	BroadcastBlockFirst     bool `json:"broadcast_block_last"`
 	BroadcastExtraBlobFirst bool `json:"broadcast_extra_blob_last"`
+}
+
+func (s ExtraBlobs) Name() string {
+	return "Extra blobs"
+}
+
+func (s ExtraBlobs) Fields() map[string]interface{} {
+	return map[string]interface{}{
+		"incorrect_kzg_commitment":   s.IncorrectKZGCommitment,
+		"incorrect_kzg_proof":        s.IncorrectKZGProof,
+		"incorrect_block_root":       s.IncorrectBlockRoot,
+		"incorrect_signature":        s.IncorrectSignature,
+		"delay_milliseconds":         s.DelayMilliseconds,
+		"broadcast_block_first":      s.BroadcastBlockFirst,
+		"broadcast_extra_blob_first": s.BroadcastExtraBlobFirst,
+	}
 }
 
 func FillSidecarWithRandomBlob(sidecar *eth.BlobSidecar) error {
@@ -337,6 +381,18 @@ type ConflictingBlobs struct {
 	AlternateBlobRecipients     bool `json:"alternate_blob_recipients"`
 }
 
+func (s ConflictingBlobs) Name() string {
+	return "Conflicting blobs"
+}
+
+func (s ConflictingBlobs) Fields() map[string]interface{} {
+	return map[string]interface{}{
+		"conflicting_blobs_count":        s.ConflictingBlobsCount,
+		"random_conflicting_blobs_count": s.RandomConflictingBlobsCount,
+		"alternate_blob_recipients":      s.AlternateBlobRecipients,
+	}
+}
+
 func (s ConflictingBlobs) GetTestPeerCount() int {
 	// We are going to send two conflicting blobs through two different test p2p connections
 	return 2
@@ -436,6 +492,16 @@ func (s ConflictingBlobs) Execute(
 type SwapBlobs struct {
 	Default
 	SplitNetwork bool `json:"split_network"`
+}
+
+func (s SwapBlobs) Name() string {
+	return "Swap blobs"
+}
+
+func (s SwapBlobs) Fields() map[string]interface{} {
+	return map[string]interface{}{
+		"split_network": s.SplitNetwork,
+	}
 }
 
 func (s SwapBlobs) GetTestPeerCount() int {

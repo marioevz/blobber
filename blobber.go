@@ -293,12 +293,6 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get block hash tree root")
 	}
-	logrus.WithFields(logrus.Fields{
-		"slot":              blResponse.Block.Slot,
-		"block_root":        fmt.Sprintf("%x", blockRoot),
-		"parent_block_root": fmt.Sprintf("%x", blResponse.Block.ParentRoot),
-		"blob_count":        len(blResponse.Blobs),
-	}).Info("Preparing action for block and blobs")
 
 	slotAction, err := b.getSlotAction(uint64(blResponse.Block.Slot))
 	if err != nil {
@@ -306,6 +300,19 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	}
 	if slotAction == nil {
 		panic("slot action is nil")
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"slot":              blResponse.Block.Slot,
+		"block_root":        fmt.Sprintf("%x", blockRoot),
+		"parent_block_root": fmt.Sprintf("%x", blResponse.Block.ParentRoot),
+		"blob_count":        len(blResponse.Blobs),
+		"action_name":       slotAction.Name(),
+	}).Info("Preparing action for block and blobs")
+
+	slotActionFields := logrus.Fields(slotAction.Fields())
+	if len(slotActionFields) > 0 {
+		logrus.WithFields(slotActionFields).Info("Action configuration")
 	}
 
 	testPeerCount := slotAction.GetTestPeerCount()
