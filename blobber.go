@@ -154,7 +154,7 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient, validatorProxy
 	logrus.WithFields(
 		logrus.Fields{
 			"state_validator_count": validatorResponses,
-			"validator_count":       len(b.ValidatorKeys),
+			"keyed_validator_count": len(b.ValidatorKeys),
 		},
 	).Info("Loaded validators from beacon node")
 
