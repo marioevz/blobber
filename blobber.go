@@ -57,7 +57,9 @@ type Blobber struct {
 	forkDecoder *beacon.ForkDecoder
 
 	// Records
-	builtBlocksMap *BuiltBlocksMap
+	builtBlocksMap    *BuiltBlocksMap
+	includeBlobRecord *common.BlobRecord
+	rejectBlobRecord  *common.BlobRecord
 }
 
 type BuiltBlocksMap struct {
@@ -90,6 +92,8 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 		builtBlocksMap: &BuiltBlocksMap{
 			BlockRoots: make(map[beacon_common.Slot][32]byte),
 		},
+		includeBlobRecord: common.NewBlobRecord(),
+		rejectBlobRecord:  common.NewBlobRecord(),
 	}
 
 	// Apply the options
@@ -125,6 +129,16 @@ func (b *Blobber) Address() string {
 		b.ExternalIP,
 		b.Port,
 	)
+}
+
+// Return a list of blobs that each slot action has classified as must-be-included
+func (b *Blobber) IncludeBlobRecord() *common.BlobRecord {
+	return b.includeBlobRecord
+}
+
+// Return a list of blobs that each slot action has classified as must-be-rejected
+func (b *Blobber) RejectBlobRecord() *common.BlobRecord {
+	return b.rejectBlobRecord
 }
 
 func (b *Blobber) Close() {
@@ -341,7 +355,16 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 
 	calcBeaconBlockDomain := b.calcBeaconBlockDomain(beacon_common.Slot(blResponse.Block.Slot))
 	blobSidecarDomain := b.calcBlobSidecarDomain(beacon_common.Slot(blResponse.Block.Slot))
-	executed, err := slotAction.Execute(testPeers, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, &proposerKey.ValidatorSecretKey)
+	executed, err := slotAction.Execute(
+		testPeers,
+		blResponse.Block,
+		calcBeaconBlockDomain,
+		blResponse.Blobs,
+		blobSidecarDomain,
+		&proposerKey.ValidatorSecretKey,
+		b.includeBlobRecord,
+		b.rejectBlobRecord,
+	)
 	if executed {
 		b.builtBlocksMap.Lock()
 		b.builtBlocksMap.BlockRoots[beacon_common.Slot(blResponse.Block.Slot)] = blockRoot
