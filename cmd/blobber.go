@@ -49,20 +49,21 @@ func fatal(err error) {
 
 func main() {
 	var (
-		clEndpoints              arrayFlags
-		nonValidatingClEndpoints arrayFlags
-		externalIP               string
-		hostIP                   string
-		clientInitTimeoutSeconds int
-		logLevel                 string
-		validatorKeyFilePath     string
-		validatorKeyFolderPath   string
-		slotActionJson           string
-		slotActionFrequency      int
-		beaconPortStart          int
-		validatorProxyPortStart  int
-		maxDevP2PSessionReuses   int
-		blobberID                uint64
+		clEndpoints                       arrayFlags
+		nonValidatingClEndpoints          arrayFlags
+		externalIP                        string
+		hostIP                            string
+		clientInitTimeoutSeconds          int
+		stateValidatorFetchTimeoutSeconds int
+		logLevel                          string
+		validatorKeyFilePath              string
+		validatorKeyFolderPath            string
+		slotActionJson                    string
+		slotActionFrequency               int
+		beaconPortStart                   int
+		validatorProxyPortStart           int
+		maxDevP2PSessionReuses            int
+		blobberID                         uint64
 	)
 
 	flag.Var(
@@ -104,6 +105,12 @@ func main() {
 		"client-init-timeout",
 		60,
 		"clients initialization wait timeout in seconds",
+	)
+	flag.IntVar(
+		&stateValidatorFetchTimeoutSeconds,
+		"state-validator-load-timeout",
+		0,
+		"state validators request timeout in seconds",
 	)
 	flag.IntVar(
 		&beaconPortStart,
@@ -251,6 +258,10 @@ func main() {
 			fatalf("error parsing slot action: %v\n", err)
 		}
 		blobberOpts = append(blobberOpts, config.WithSlotAction(slotAction))
+	}
+
+	if stateValidatorFetchTimeoutSeconds > 0 {
+		blobberOpts = append(blobberOpts, config.WithValidatorLoadTimeoutSeconds(stateValidatorFetchTimeoutSeconds))
 	}
 
 	b, err := blobber.NewBlobber(context.Background(), blobberOpts...)

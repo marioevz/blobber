@@ -29,6 +29,8 @@ type Config struct {
 	ValidatorKeysList            []*ValidatorKey
 	AlwaysErrorValidatorResponse bool
 
+	ValidatorLoadTimeoutSeconds int
+
 	SlotAction          slot_actions.SlotAction
 	SlotActionFrequency uint64
 }
@@ -124,6 +126,18 @@ func WithLogLevel(level string) Option {
 			return nil
 		},
 		description: fmt.Sprintf("WithLogLevel(%s)", level),
+	}
+}
+
+func WithValidatorLoadTimeoutSeconds(timeout int) Option {
+	return Option{
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.ValidatorLoadTimeoutSeconds = timeout
+			return nil
+		},
+		description: fmt.Sprintf("WithValidatorLoadTimeoutSeconds(%d)", timeout),
 	}
 }
 
