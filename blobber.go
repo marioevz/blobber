@@ -17,6 +17,7 @@ import (
 	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
 	"github.com/pkg/errors"
 	"github.com/protolambda/eth2api"
+	"github.com/protolambda/eth2api/client/beaconapi"
 	"github.com/protolambda/zrnt/eth2/beacon"
 	beacon_common "github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/ztyp/tree"
@@ -38,6 +39,8 @@ const (
 	DEFAULT_BLOBBER_HOST       = "0.0.0.0"
 	DEFAULT_BLOBBER_PORT       = 19999
 	DEFAULT_PROXIES_PORT_START = 20000
+
+	DEFAULT_VALIDATOR_LOAD_TIMEOUT_SECONDS = 20
 )
 
 type Blobber struct {
@@ -71,6 +74,8 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 			Host:             DEFAULT_BLOBBER_HOST,
 			Port:             DEFAULT_BLOBBER_PORT,
 			ProxiesPortStart: DEFAULT_PROXIES_PORT_START,
+
+			ValidatorLoadTimeoutSeconds: DEFAULT_VALIDATOR_LOAD_TIMEOUT_SECONDS,
 		},
 	}
 
@@ -142,10 +147,55 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient, validatorProxy
 	if b.ValidatorKeys == nil {
 		b.ValidatorKeys = make(map[beacon_common.ValidatorIndex]*config.ValidatorKey)
 	}
-	validatorResponses, err := cl.StateValidators(b.ctx, eth2api.StateHead, nil, nil)
+	validatorResponses, err := b.loadStateValidators(b.ctx, cl, eth2api.StateHead, nil, nil)
 	if err != nil {
 		panic(err)
 	}
+	logrus.WithFields(
+		logrus.Fields{
+			"state_validator_count": validatorResponses,
+			"keyed_validator_count": len(b.ValidatorKeys),
+		},
+	).Info("Loaded validators from beacon node")
+
+	return proxy
+}
+
+func (b *Blobber) loadStateValidators(
+	parentCtx context.Context,
+	bn *beacon_client.BeaconClient,
+	stateId eth2api.StateId,
+	validatorIds []eth2api.ValidatorId,
+	statusFilter []eth2api.ValidatorStatus,
+) (int, error) {
+	var (
+		validatorResponses = make(
+			[]eth2api.ValidatorResponse,
+			0,
+		)
+		exists bool
+		err    error
+	)
+	ctx, cancel := context.WithTimeout(
+		parentCtx,
+		time.Second*time.Duration(b.ValidatorLoadTimeoutSeconds),
+	)
+	defer cancel()
+	exists, err = beaconapi.StateValidators(
+		ctx,
+		bn.API(),
+		stateId,
+		validatorIds,
+		statusFilter,
+		&validatorResponses,
+	)
+	if !exists {
+		return 0, fmt.Errorf("endpoint not found on beacon client")
+	}
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to get validators")
+	}
+
 	for _, validatorResponse := range validatorResponses {
 		validatorIndex := validatorResponse.Index
 		validatorPubkey := validatorResponse.Validator.Pubkey
@@ -156,7 +206,8 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient, validatorProxy
 			}
 		}
 	}
-	return proxy
+
+	return len(validatorResponses), err
 }
 
 func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
