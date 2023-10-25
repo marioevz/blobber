@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -54,6 +55,14 @@ type Blobber struct {
 
 	// Other
 	forkDecoder *beacon.ForkDecoder
+
+	// Records
+	builtBlocksMap *BuiltBlocksMap
+}
+
+type BuiltBlocksMap struct {
+	BlockRoots map[beacon_common.Slot][32]byte
+	sync.RWMutex
 }
 
 func init() {
@@ -76,6 +85,10 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 			ProxiesPortStart: DEFAULT_PROXIES_PORT_START,
 
 			ValidatorLoadTimeoutSeconds: DEFAULT_VALIDATOR_LOAD_TIMEOUT_SECONDS,
+		},
+
+		builtBlocksMap: &BuiltBlocksMap{
+			BlockRoots: make(map[beacon_common.Slot][32]byte),
 		},
 	}
 
@@ -210,6 +223,16 @@ func (b *Blobber) loadStateValidators(
 	return len(validatorResponses), err
 }
 
+func (b *Blobber) GetProducedBlockRoots() map[beacon_common.Slot][32]byte {
+	b.builtBlocksMap.RLock()
+	defer b.builtBlocksMap.RUnlock()
+	blockRoots := make(map[beacon_common.Slot][32]byte)
+	for slot, blockRoot := range b.builtBlocksMap.BlockRoots {
+		blockRoots[slot] = blockRoot
+	}
+	return blockRoots
+}
+
 func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 	ctx, cancel := context.WithTimeout(b.ctx, time.Second*1)
 	defer cancel()
@@ -311,8 +334,13 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 
 	calcBeaconBlockDomain := b.calcBeaconBlockDomain(beacon_common.Slot(blResponse.Block.Slot))
 	blobSidecarDomain := b.calcBlobSidecarDomain(beacon_common.Slot(blResponse.Block.Slot))
-
-	return slotAction.Execute(testPeers, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, &proposerKey.ValidatorSecretKey)
+	executed, err := slotAction.Execute(testPeers, blResponse.Block, calcBeaconBlockDomain, blResponse.Blobs, blobSidecarDomain, &proposerKey.ValidatorSecretKey)
+	if executed {
+		b.builtBlocksMap.Lock()
+		b.builtBlocksMap.BlockRoots[beacon_common.Slot(blResponse.Block.Slot)] = blockRoot
+		b.builtBlocksMap.Unlock()
+	}
+	return executed, errors.Wrap(err, "failed to execute slot action")
 }
 
 func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id int, version int) validator_proxy.ResponseCallback {
