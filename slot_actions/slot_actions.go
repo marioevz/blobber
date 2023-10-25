@@ -7,6 +7,7 @@ import (
 	math_rand "math/rand"
 	"time"
 
+	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/kzg"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/pkg/errors"
@@ -28,6 +29,8 @@ type SlotAction interface {
 		blobSidecars []*eth.BlobSidecar,
 		blobSidecarDomain beacon_common.BLSDomain,
 		proposerKey *[32]byte,
+		includeBlobRecord *common.BlobRecord,
+		rejectBlobRecord *common.BlobRecord,
 	) (bool, error)
 }
 
@@ -90,6 +93,8 @@ func (s Default) Execute(
 	blobSidecars []*eth.BlobSidecar,
 	blobSidecarDomain beacon_common.BLSDomain,
 	proposerKey *[32]byte,
+	includeBlobRecord *common.BlobRecord,
+	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	// Sign block and blobs
 	signedBlock, err := SignBlock(beaconBlock, beaconBlockDomain, proposerKey)
@@ -110,6 +115,9 @@ func (s Default) Execute(
 	if err := testPeers.BroadcastSignedBlobSidecars(signedBlobs); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 	}
+
+	// Add the blobs to the must-include blob record
+	includeBlobRecord.Add(beacon_common.Slot(beaconBlock.Slot), blobSidecars...)
 
 	return true, nil
 }
@@ -133,6 +141,8 @@ func (s BroadcastBlobsBeforeBlock) Execute(
 	blobSidecars []*eth.BlobSidecar,
 	blobSidecarDomain beacon_common.BLSDomain,
 	proposerKey *[32]byte,
+	includeBlobRecord *common.BlobRecord,
+	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	// Sign block and blobs
 	signedBlock, err := SignBlock(beaconBlock, beaconBlockDomain, proposerKey)
@@ -153,6 +163,9 @@ func (s BroadcastBlobsBeforeBlock) Execute(
 	if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
+
+	// Add the blobs to the must-include blob record
+	includeBlobRecord.Add(beacon_common.Slot(beaconBlock.Slot), blobSidecars...)
 
 	return true, nil
 }
@@ -179,6 +192,8 @@ func (s BlobGossipDelay) Execute(
 	blobSidecars []*eth.BlobSidecar,
 	blobSidecarDomain beacon_common.BLSDomain,
 	proposerKey *[32]byte,
+	includeBlobRecord *common.BlobRecord,
+	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	// Sign block and blobs
 	signedBlock, err := SignBlock(beaconBlock, beaconBlockDomain, proposerKey)
@@ -255,6 +270,8 @@ func (s ExtraBlobs) Execute(
 	blobSidecars []*eth.BlobSidecar,
 	blobSidecarDomain beacon_common.BLSDomain,
 	proposerKey *[32]byte,
+	includeBlobRecord *common.BlobRecord,
+	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	// Sign block and blobs
 	signedBlock, err := SignBlock(beaconBlock, beaconBlockDomain, proposerKey)
@@ -371,6 +388,12 @@ func (s ExtraBlobs) Execute(
 		}
 	}
 
+	// Add the blobs to the must-include blob record
+	includeBlobRecord.Add(beacon_common.Slot(beaconBlock.Slot), blobSidecars...)
+
+	// Add the extra blob to the must-reject blob record
+	rejectBlobRecord.Add(beacon_common.Slot(beaconBlock.Slot), extraBlobSidecar)
+
 	return true, nil
 }
 
@@ -415,6 +438,8 @@ func (s ConflictingBlobs) Execute(
 	blobSidecars []*eth.BlobSidecar,
 	blobSidecarDomain beacon_common.BLSDomain,
 	proposerKey *[32]byte,
+	includeBlobRecord *common.BlobRecord,
+	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	if len(testPeers) != 2 {
 		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
@@ -463,6 +488,9 @@ func (s ConflictingBlobs) Execute(
 			if err != nil {
 				return false, errors.Wrap(err, "failed to sign extra blob")
 			}
+
+			// Add the blob to the must-reject blob record
+			rejectBlobRecord.Add(beacon_common.Slot(beaconBlock.Slot), conflictingBlobSidecar)
 		} else {
 			secondBlobSidecars[i] = signedBlobs[i]
 		}
@@ -482,6 +510,9 @@ func (s ConflictingBlobs) Execute(
 	if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
+
+	// Add the blobs to the must-include blob record
+	includeBlobRecord.Add(beacon_common.Slot(beaconBlock.Slot), blobSidecars...)
 
 	return true, nil
 }
@@ -548,6 +579,8 @@ func (s SwapBlobs) Execute(
 	blobSidecars []*eth.BlobSidecar,
 	blobSidecarDomain beacon_common.BLSDomain,
 	proposerKey *[32]byte,
+	includeBlobRecord *common.BlobRecord,
+	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	var (
 		signedBlock          *eth.SignedBeaconBlockDeneb
@@ -597,6 +630,15 @@ func (s SwapBlobs) Execute(
 	// Broadcast the block
 	if err := testPeers.BroadcastSignedBeaconBlockDeneb(signedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
+	}
+
+	// Add the blobs to the records
+	if s.SplitNetwork {
+		// The signed blobs with the correct indexes do make their way into the network, so they must be present in the block
+		includeBlobRecord.Add(beacon_common.Slot(beaconBlock.Slot), blobSidecars...)
+	} else {
+		// Only the modified invalid blob sidecars make their way into the network, so they shouldn't be present in the block
+		rejectBlobRecord.Add(beacon_common.Slot(beaconBlock.Slot), modifiedBlobSidecars...)
 	}
 
 	return true, nil
