@@ -7,26 +7,41 @@ import (
 	"net"
 	"testing"
 
-	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p/encoder"
 )
 
 var sszNetworkEncoder = encoder.SszNetworkEncoder{}
 
+func GetFreePort() (port int64, err error) {
+	var a *net.TCPAddr
+	if a, err = net.ResolveTCPAddr("tcp", "localhost:0"); err == nil {
+		var l *net.TCPListener
+		if l, err = net.ListenTCP("tcp", a); err == nil {
+			defer l.Close()
+			return int64(l.Addr().(*net.TCPAddr).Port), nil
+		}
+	}
+	return
+}
+
 func TestTypesEncoding(t *testing.T) {
 	testP2PInstance := &p2p.TestP2P{
 		ExternalIP:  net.IP{127, 0, 0, 1},
-		ChainStatus: common.NewStatus(),
+		ChainStatus: p2p.NewStatus(),
 	}
-	testPeer, err := testP2PInstance.NewTestPeer(context.Background(), 8080)
+	port, err := GetFreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	testPeer, err := testP2PInstance.NewTestPeer(context.Background(), port)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer testPeer.Close()
 
 	var b bytes.Buffer
-	if _, err := sszNetworkEncoder.EncodeWithMaxLength(&b, testPeer.MetaData); err != nil {
+	if _, err := sszNetworkEncoder.EncodeWithMaxLength(&b, p2p.WrapSSZObject(testPeer.MetaData)); err != nil {
 		t.Fatalf("failed to encode metadata: %v", err)
 	}
 }

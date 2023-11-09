@@ -1,4 +1,4 @@
-package config
+package keys
 
 import (
 	"bufio"
@@ -18,9 +18,18 @@ import (
 
 type ValidatorKey struct {
 	// ValidatorSecretKey is the serialized secret key for validator duties
-	ValidatorSecretKey [32]byte
+	ValidatorSecretKey *blsu.SecretKey
 	// ValidatorPubkey is the serialized pubkey derived from ValidatorSecretKey
-	ValidatorPubkey [48]byte
+	ValidatorPubkey *blsu.Pubkey
+}
+
+func (vk *ValidatorKey) FromBytes(secretKey []byte) error {
+	if len(secretKey) != 32 {
+		return fmt.Errorf("invalid secret key length: %d, expected 32", len(secretKey))
+	}
+	vk.ValidatorSecretKey = new(blsu.SecretKey)
+	vk.ValidatorSecretKey.Deserialize((*[32]byte)(secretKey))
+	return vk.FillPubKey()
 }
 
 func (vk *ValidatorKey) FromHex(secretKeyHex string) error {
@@ -34,28 +43,34 @@ func (vk *ValidatorKey) FromHex(secretKeyHex string) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to decode secret key")
 	}
-	if len(secretKey) != len(vk.ValidatorSecretKey) {
-		return fmt.Errorf("invalid secret key length: %d, expected %d", len(secretKey), len(vk.ValidatorSecretKey))
-	}
-	copy(vk.ValidatorSecretKey[:], secretKey)
-
-	return vk.FillPubKey()
+	return vk.FromBytes(secretKey)
 }
 
 func (vk *ValidatorKey) FillPubKey() error {
-	sk := new(blsu.SecretKey)
-	if err := sk.Deserialize(&vk.ValidatorSecretKey); err != nil {
-		return errors.Wrap(err, "failed to deserialize secret key")
-	}
-
-	pk, err := blsu.SkToPk(sk)
+	var err error
+	vk.ValidatorPubkey, err = blsu.SkToPk(vk.ValidatorSecretKey)
 	if err != nil {
 		return errors.Wrap(err, "failed to derive pubkey from secret key")
 	}
-	pkSerialized := pk.Serialize()
-	copy(vk.ValidatorPubkey[:], pkSerialized[:])
-
 	return nil
+}
+
+func (vk *ValidatorKey) SecretKeyToBytes() []byte {
+	b := vk.ValidatorSecretKey.Serialize()
+	return b[:]
+}
+
+func (vk *ValidatorKey) SecretKeyToHex() string {
+	return hex.EncodeToString(vk.SecretKeyToBytes())
+}
+
+func (vk *ValidatorKey) PubKeyToBytes() []byte {
+	b := vk.ValidatorPubkey.Serialize()
+	return b[:]
+}
+
+func (vk *ValidatorKey) PubKeyToHex() string {
+	return hex.EncodeToString(vk.PubKeyToBytes())
 }
 
 func KeyListFromFile(path string) ([]*ValidatorKey, error) {
@@ -132,19 +147,16 @@ func KeyListFromFolder(pathStr string) ([]*ValidatorKey, error) {
 
 		// Get secret key from keystore
 		secretKey, err := keystore.Decrypt(secretKeyBase64)
-
 		if err != nil {
 			return nil, fmt.Errorf("failed to decrypt secret key: %s", err)
 		}
 
 		validatorKey := new(ValidatorKey)
-		copy(validatorKey.ValidatorSecretKey[:], secretKey)
-		if err := validatorKey.FillPubKey(); err != nil {
-			return nil, errors.Wrap(err, "failed to parse validator key")
-		}
+		validatorKey.FromBytes(secretKey)
+
 		logrus.WithFields(
 			logrus.Fields{
-				"ValidatorPubkey": hex.EncodeToString(validatorKey.ValidatorPubkey[:]),
+				"ValidatorPubkey": validatorKey.PubKeyToHex(),
 			},
 		).Info("Imported validator key to list")
 		validatorKeyList = append(validatorKeyList, validatorKey)
