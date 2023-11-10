@@ -8,15 +8,37 @@ import (
 
 func TestSlotActionsJsonParsing(t *testing.T) {
 	jsonString := `{
-		"name": "broadcast_blobs_before_block"
+		"broadcast_blobs_first": true
 	}
 	`
 	act, err := slot_actions.UnmarshallSlotAction([]byte(jsonString))
 	if err != nil {
 		t.Fatalf("UnmarshallSlotAction() error = %v", err)
 	}
-	if _, ok := act.(*slot_actions.BroadcastBlobsBeforeBlock); !ok {
+	if actCast, ok := act.(*slot_actions.Default); !ok {
 		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
+	} else {
+		if actCast.BroadcastBlobsFirst != true {
+			t.Fatalf("UnmarshallSlotAction() broadcast_blobs_first = %t", actCast.BroadcastBlobsFirst)
+		}
+	}
+
+	jsonString = `{
+		"name": "blob_gossip_delay",
+		"delay_milliseconds": 1000,
+		"broadcast_blobs_first": true
+	}
+	`
+	act, err = slot_actions.UnmarshallSlotAction([]byte(jsonString))
+	if err != nil {
+		t.Fatalf("UnmarshallSlotAction() error = %v", err)
+	}
+	if actCast, ok := act.(*slot_actions.BlobGossipDelay); !ok {
+		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
+	} else {
+		if actCast.DelayMilliseconds != 1000 {
+			t.Fatalf("UnmarshallSlotAction() delay_milliseconds = %d", actCast.DelayMilliseconds)
+		}
 	}
 	/*
 		TODO: Refactor this test

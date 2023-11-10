@@ -3,6 +3,7 @@ package slot_actions
 import (
 	"bytes"
 	"sync"
+	"time"
 
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
@@ -36,6 +37,69 @@ func SignBlockContents(spec *common.Spec, blockContents *deneb.BlockContents, be
 		KZGProofs: blockContents.KZGProofs,
 		Blobs:     blockContents.Blobs,
 	}, nil
+}
+
+func CreatedSignedBlockSidecarsBundle(
+	spec *common.Spec,
+	beaconBlockContents *deneb.BlockContents,
+	beaconBlockDomain common.BLSDomain,
+	validatorKey *keys.ValidatorKey,
+) (*SignedBlockSidecarsBundle, error) {
+	signedBlockContents, err := SignBlockContents(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to sign block")
+	}
+	blobSidecars, err := signedBlockContents.GenerateSidecars(spec, tree.GetHashFn())
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to generate blob sidecars")
+	}
+	return &SignedBlockSidecarsBundle{
+		SignedBlock:  signedBlockContents.SignedBlock,
+		BlobSidecars: blobSidecars,
+	}, nil
+}
+
+func CreateSignEquivocatingBlock(
+	spec *common.Spec,
+	beaconBlockContents *deneb.BlockContents,
+	beaconBlockDomain common.BLSDomain,
+	validatorKey *keys.ValidatorKey,
+) ([]*SignedBlockSidecarsBundle, error) {
+	// Create an equivocating block by modifying the graffiti of the block
+	equivocatingBlockContents, err := CopyBlockContents(beaconBlockContents)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to copy block contents")
+	}
+
+	// Modify the graffiti to generate a different block
+	graffitiModifier := &GraffitiModifier{
+		NewGraffiti: "Equiv",
+		Append:      true,
+	}
+	graffitiModifier.ModifyBlock(spec, equivocatingBlockContents.Block)
+
+	beaconBlocksContents := []*deneb.BlockContents{
+		beaconBlockContents,
+		equivocatingBlockContents,
+	}
+
+	// Sign the blocks and generate the sidecars
+	signedBlockBlobsBundles := make([]*SignedBlockSidecarsBundle, len(beaconBlocksContents))
+	for i, blockContents := range beaconBlocksContents {
+		signedBlockContents, err := SignBlockContents(spec, blockContents, beaconBlockDomain, validatorKey)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to sign block")
+		}
+		blobSidecars, err := signedBlockContents.GenerateSidecars(spec, tree.GetHashFn())
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to generate blob sidecars")
+		}
+		signedBlockBlobsBundles[i] = &SignedBlockSidecarsBundle{
+			SignedBlock:  signedBlockContents.SignedBlock,
+			BlobSidecars: blobSidecars,
+		}
+	}
+	return signedBlockBlobsBundles, nil
 }
 
 func CopyInclusionProofs(proof deneb.KZGCommitmentInclusionProof) deneb.KZGCommitmentInclusionProof {
@@ -123,18 +187,29 @@ func MultiPeerBlobBroadcast(spec *common.Spec, peers p2p.TestPeers, blobsLists .
 }
 
 type SignedBlockSidecarsBundle struct {
-	SignedBlockContents *deneb.SignedBeaconBlock
-	BlobSidecars        []*deneb.BlobSidecar
+	SignedBlock  *deneb.SignedBeaconBlock
+	BlobSidecars []*deneb.BlobSidecar
 }
 
-func MultiPeerSignedBlockBlobBroadcast(spec *common.Spec, peers p2p.TestPeers, blobsFirst bool, bundles ...*SignedBlockSidecarsBundle) error {
-	if len(peers) != len(bundles) {
+type BundleBroadcaster struct {
+	Spec  *common.Spec
+	Peers p2p.TestPeers
+	// Delay in milliseconds between broadcast of blocks and blob sidecars
+	DelayMilliseconds int
+	// Delay in milliseconds between broadcast to different peers
+	PeerBroadcastDelayMilliseconds int
+	// If true, broadcast blobs first, then blocks
+	BlobsFirst bool
+}
+
+func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) error {
+	if len(b.Peers) != len(bundles) {
 		return errors.New("peers and bundles must have the same length")
 	}
 
 	broadcastBlobs := func(testPeer *p2p.TestPeer, blobs []*deneb.BlobSidecar) error {
 		for i, blob := range blobs {
-			if err := testPeer.BroadcastBlobSidecar(spec, blob, nil); err != nil {
+			if err := testPeer.BroadcastBlobSidecar(b.Spec, blob, nil); err != nil {
 				return errors.Wrapf(err, "failed to broadcast signed blob %d", i)
 			}
 		}
@@ -142,30 +217,36 @@ func MultiPeerSignedBlockBlobBroadcast(spec *common.Spec, peers p2p.TestPeers, b
 	}
 
 	broadcastBlock := func(testPeer *p2p.TestPeer, signedBlock *deneb.SignedBeaconBlock) error {
-		if err := testPeer.BroadcastSignedBeaconBlock(spec, signedBlock); err != nil {
+		if err := testPeer.BroadcastSignedBeaconBlock(b.Spec, signedBlock); err != nil {
 			return errors.Wrap(err, "failed to broadcast signed block")
 		}
 		return nil
 	}
 
 	wg := sync.WaitGroup{}
-	errs := make(chan error, len(peers))
+	errs := make(chan error, len(b.Peers))
 
 	broadcastBundle := func(testPeer *p2p.TestPeer, bundle *SignedBlockSidecarsBundle) {
 		defer wg.Done()
-		if blobsFirst {
+		if b.BlobsFirst {
 			if err := broadcastBlobs(testPeer, bundle.BlobSidecars); err != nil {
 				errs <- err
 				return
 			}
-			if err := broadcastBlock(testPeer, bundle.SignedBlockContents); err != nil {
+			if b.DelayMilliseconds > 0 {
+				time.Sleep(time.Duration(b.DelayMilliseconds) * time.Millisecond)
+			}
+			if err := broadcastBlock(testPeer, bundle.SignedBlock); err != nil {
 				errs <- err
 				return
 			}
 		} else {
-			if err := broadcastBlock(testPeer, bundle.SignedBlockContents); err != nil {
+			if err := broadcastBlock(testPeer, bundle.SignedBlock); err != nil {
 				errs <- err
 				return
+			}
+			if b.DelayMilliseconds > 0 {
+				time.Sleep(time.Duration(b.DelayMilliseconds) * time.Millisecond)
 			}
 			if err := broadcastBlobs(testPeer, bundle.BlobSidecars); err != nil {
 				errs <- err
@@ -174,9 +255,12 @@ func MultiPeerSignedBlockBlobBroadcast(spec *common.Spec, peers p2p.TestPeers, b
 		}
 	}
 
-	for i, testPeer := range peers {
+	for i, testPeer := range b.Peers {
 		wg.Add(1)
 		go broadcastBundle(testPeer, bundles[i])
+		if b.PeerBroadcastDelayMilliseconds > 0 {
+			time.Sleep(time.Duration(b.PeerBroadcastDelayMilliseconds) * time.Millisecond)
+		}
 	}
 
 	wg.Wait()

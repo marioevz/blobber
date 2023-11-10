@@ -5,19 +5,21 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lithammer/dedent"
 	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/pkg/errors"
 	beacon_common "github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/zrnt/eth2/beacon/deneb"
-	"github.com/protolambda/ztyp/tree"
 )
 
 const MAX_BLOBS_PER_BLOCK = 6
 
 type SlotAction interface {
 	Name() string
+	Description() string
+	SlotMiss(spec *beacon_common.Spec) bool
 	Fields() map[string]interface{}
 	GetTestPeerCount() int
 	Execute(
@@ -46,14 +48,14 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 
 	var action SlotAction
 	switch actionNameObj.Name {
-	case "default":
-		action = &Default{}
-	case "broadcast_blobs_before_block":
-		action = &BroadcastBlobsBeforeBlock{}
 	case "blob_gossip_delay":
 		action = &BlobGossipDelay{}
 	case "equivocating_block_and_blobs":
 		action = &EquivocatingBlockAndBlobs{}
+	case "equivocating_block_header_in_blobs":
+		action = &EquivocatingBlockHeaderInBlobs{}
+	case "equivocating_block":
+		action = &EquivocatingBlock{}
 	/*
 		case "extra_blobs":
 			action = &ExtraBlobs{}
@@ -63,7 +65,7 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 			action = &SwapBlobs{}
 	*/
 	default:
-		return nil, fmt.Errorf("unknown slot action name: %s", actionNameObj.Name)
+		action = &Default{}
 	}
 
 	if err := json.Unmarshal(data, &action); err != nil {
@@ -72,10 +74,36 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 	return action, nil
 }
 
-type Default struct{}
+type Default struct {
+	BroadcastBlobsFirst bool `json:"broadcast_blobs_first"`
+}
 
 func (s Default) Name() string {
 	return "Default"
+}
+
+func (s Default) Description() string {
+	desc := dedent.Dedent(`
+		Default block and blob gossiping behaviour:
+		- Sign the block
+		- Generate the blob sidecars
+	`)
+	if s.BroadcastBlobsFirst {
+		desc += dedent.Dedent(`
+		- Broadcast the blob sidecars
+		- Broadcast the block
+	`)
+	} else {
+		desc += dedent.Dedent(`
+		- Broadcast the block
+		- Broadcast the blob sidecars
+	`)
+	}
+	return desc
+}
+
+func (s Default) SlotMiss(_ *beacon_common.Spec) bool {
+	return false
 }
 
 func (s Default) Fields() map[string]interface{} {
@@ -96,76 +124,21 @@ func (s Default) Execute(
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
-	// Sign block
-	signedBlockContents, err := SignBlockContents(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
+	// Sign block and create sidecars
+	signedBlockBlobsBundle, err := CreatedSignedBlockSidecarsBundle(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to sign block")
-	}
-	blobSidecars, err := signedBlockContents.GenerateSidecars(spec, tree.GetHashFn())
-	if err != nil {
-		return false, errors.Wrap(err, "failed to generate blob sidecars")
+		return false, errors.Wrap(err, "failed to create and sign block and blobs")
 	}
 
-	// Broadcast the block
-	if err := testPeers.BroadcastSignedBeaconBlock(spec, signedBlockContents.SignedBlock); err != nil {
-		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
+	// Broadcast the signed block and blobs
+	broadcaster := BundleBroadcaster{
+		Spec:       spec,
+		Peers:      testPeers,
+		BlobsFirst: s.BroadcastBlobsFirst,
 	}
-
-	// Broadcast the blobs
-	if err := testPeers.BroadcastBlobSidecars(spec, blobSidecars...); err != nil {
-		return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
+	if err = broadcaster.Broadcast(signedBlockBlobsBundle); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed beacon block and blob sidecars")
 	}
-
-	// Add the blobs to the must-include blob record
-	includeBlobRecord.Add(beaconBlockContents.Block.Slot, blobSidecars...)
-
-	return true, nil
-}
-
-type BroadcastBlobsBeforeBlock struct {
-	Default
-}
-
-func (s BroadcastBlobsBeforeBlock) Name() string {
-	return "Broadcast blobs before block"
-}
-
-func (s BroadcastBlobsBeforeBlock) Fields() map[string]interface{} {
-	return map[string]interface{}{}
-}
-
-func (s BroadcastBlobsBeforeBlock) Execute(
-	spec *beacon_common.Spec,
-	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
-	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
-) (bool, error) {
-	// Sign block
-	signedBlockContents, err := SignBlockContents(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to sign block")
-	}
-	blobSidecars, err := signedBlockContents.GenerateSidecars(spec, tree.GetHashFn())
-	if err != nil {
-		return false, errors.Wrap(err, "failed to generate blob sidecars")
-	}
-
-	// Broadcast the blobs
-	if err := testPeers.BroadcastBlobSidecars(spec, blobSidecars...); err != nil {
-		return false, errors.Wrap(err, "failed to broadcast blob sidecar")
-	}
-
-	// Broadcast the block
-	if err := testPeers.BroadcastSignedBeaconBlock(spec, signedBlockContents.SignedBlock); err != nil {
-		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
-	}
-
-	// Add the blobs to the must-include blob record
-	includeBlobRecord.Add(beaconBlockContents.Block.Slot, blobSidecars...)
-
 	return true, nil
 }
 
@@ -176,6 +149,22 @@ type BlobGossipDelay struct {
 
 func (s BlobGossipDelay) Name() string {
 	return "Blob gossip delay"
+}
+
+func (s BlobGossipDelay) Description() string {
+	return fmt.Sprintf(dedent.Dedent(`
+		Insert a delay before gossiping the blobs:
+		- Sign the block
+		- Generate the blob sidecars
+		- Broadcast the block
+		- Insert a delay of %d milliseconds
+		- Broadcast the blob sidecars
+	`), s.DelayMilliseconds)
+}
+
+func (s BlobGossipDelay) SlotMiss(spec *beacon_common.Spec) bool {
+	// Consider a slot miss only if the delay is more than half a slot
+	return s.DelayMilliseconds >= int(spec.SECONDS_PER_SLOT*1000)/2
 }
 
 func (s BlobGossipDelay) Fields() map[string]interface{} {
@@ -193,42 +182,61 @@ func (s BlobGossipDelay) Execute(
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
-	// Sign block
-	signedBlockContents, err := SignBlockContents(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
+	// Sign block and create sidecars
+	signedBlockBlobsBundle, err := CreatedSignedBlockSidecarsBundle(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to sign block")
-	}
-	blobSidecars, err := signedBlockContents.GenerateSidecars(spec, tree.GetHashFn())
-	if err != nil {
-		return false, errors.Wrap(err, "failed to generate blob sidecars")
+		return false, errors.Wrap(err, "failed to create and sign block and blobs")
 	}
 
-	// Broadcast the block
-	if err := testPeers.BroadcastSignedBeaconBlock(spec, signedBlockContents.SignedBlock); err != nil {
-		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
+	// Broadcast the signed block and blobs
+	broadcaster := BundleBroadcaster{
+		Spec:              spec,
+		Peers:             testPeers,
+		BlobsFirst:        s.BroadcastBlobsFirst,
+		DelayMilliseconds: s.DelayMilliseconds,
 	}
-
-	// Insert a delay before gossiping the blobs
-	time.Sleep(time.Duration(s.DelayMilliseconds) * time.Millisecond)
-
-	// Broadcast the blobs
-	if err := testPeers.BroadcastBlobSidecars(spec, blobSidecars...); err != nil {
-		return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
+	if err = broadcaster.Broadcast(signedBlockBlobsBundle); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed beacon block and blob sidecars")
 	}
-
 	return true, nil
 }
 
 type EquivocatingBlockAndBlobs struct {
 	Default
-	SendBlobsFirst      bool
-	ModifyBlobs         bool
-	ModifyKZGProofs     bool
+	BroadcastBlobsFirst bool
+	// TODO: ModifyBlobs         bool
+	// TODO: ModifyKZGProofs     bool
 	AlternateRecipients bool
 }
 
 func (s EquivocatingBlockAndBlobs) Name() string {
 	return "Equivocating Block and Blobs"
+}
+
+func (s EquivocatingBlockAndBlobs) Description() string {
+	desc := dedent.Dedent(`
+	Equivocating block and blobs:
+	- Create an equivocating block by modifying the graffiti
+	- Sign both blocks
+	- Generate the sidecars for both blocks
+	`)
+	if s.BroadcastBlobsFirst {
+		desc += dedent.Dedent(`
+		- Broadcast the blob sidecars for both blocks to different peers
+		- Broadcast the signed blocks to different peers
+	`)
+	} else {
+		desc += dedent.Dedent(`
+		- Broadcast the signed blocks to different peers
+		- Broadcast the blob sidecars for both blocks to different peers
+	`)
+	}
+	if s.AlternateRecipients {
+		desc += dedent.Dedent(`
+		- Alternate the recipients of the blocks and blobs every time the action is executed
+	`)
+	}
+	return desc
 }
 
 func (s EquivocatingBlockAndBlobs) Fields() map[string]interface{} {
@@ -252,39 +260,10 @@ func (s EquivocatingBlockAndBlobs) Execute(
 	if len(testPeers) != 2 {
 		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
 	}
-
-	secondBlockContents, err := CopyBlockContents(beaconBlockContents)
+	// Sign the blocks (original and equivocating) and generate the sidecars
+	signedBlockBlobsBundles, err := CreateSignEquivocatingBlock(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to copy block contents")
-	}
-
-	// Modify the graffiti to generate a different block
-	graffitiModifier := &GraffitiModifier{
-		NewGraffiti: "Equiv",
-		Append:      true,
-	}
-	graffitiModifier.ModifyBlock(spec, secondBlockContents.Block)
-
-	beaconBlocksContents := []*deneb.BlockContents{
-		beaconBlockContents,
-		secondBlockContents,
-	}
-
-	// Sign the blocks and generate the sidecars
-	signedBlockBlobsBundles := make([]*SignedBlockSidecarsBundle, len(beaconBlocksContents))
-	for i, blockContents := range beaconBlocksContents {
-		signedBlockContents, err := SignBlockContents(spec, blockContents, beaconBlockDomain, validatorKey)
-		if err != nil {
-			return false, errors.Wrap(err, "failed to sign block")
-		}
-		blobSidecars, err := signedBlockContents.GenerateSidecars(spec, tree.GetHashFn())
-		if err != nil {
-			return false, errors.Wrap(err, "failed to generate blob sidecars")
-		}
-		signedBlockBlobsBundles[i] = &SignedBlockSidecarsBundle{
-			SignedBlockContents: signedBlockContents.SignedBlock,
-			BlobSidecars:        blobSidecars,
-		}
+		return false, errors.Wrap(err, "failed to create and sign equivocating block")
 	}
 
 	if s.AlternateRecipients && (beaconBlockContents.Block.Slot%2 == 0) {
@@ -292,7 +271,153 @@ func (s EquivocatingBlockAndBlobs) Execute(
 	}
 
 	// Broadcast the signed block and blobs
-	if err := MultiPeerSignedBlockBlobBroadcast(spec, testPeers, s.SendBlobsFirst, signedBlockBlobsBundles...); err != nil {
+	broadcaster := BundleBroadcaster{
+		Spec:       spec,
+		Peers:      testPeers,
+		BlobsFirst: s.BroadcastBlobsFirst,
+	}
+	if err := broadcaster.Broadcast(signedBlockBlobsBundles...); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
+	}
+
+	return true, nil
+}
+
+type EquivocatingBlockHeaderInBlobs struct {
+	Default
+	BroadcastBlobsFirst bool
+}
+
+func (s EquivocatingBlockHeaderInBlobs) Name() string {
+	return "Equivocating Block Header in Blobs"
+}
+
+func (s EquivocatingBlockHeaderInBlobs) Description() string {
+	desc := dedent.Dedent(`
+	Equivocating Block Header in Blobs:
+	- Create an equivocating block by modifying the graffiti
+	- Sign both blocks
+	- Generate the sidecars out of the equivocating block only
+	`)
+	if s.BroadcastBlobsFirst {
+		desc += dedent.Dedent(`
+		- Broadcast the blob sidecars
+		- Broadcast the first signed block only
+	`)
+	} else {
+		desc += dedent.Dedent(`
+		- Broadcast the first signed block only
+		- Broadcast the blob sidecars
+	`)
+	}
+	return desc
+}
+
+func (s EquivocatingBlockHeaderInBlobs) Fields() map[string]interface{} {
+	return map[string]interface{}{}
+}
+
+func (s EquivocatingBlockHeaderInBlobs) Execute(
+	spec *beacon_common.Spec,
+	testPeers p2p.TestPeers,
+	beaconBlockContents *deneb.BlockContents,
+	beaconBlockDomain beacon_common.BLSDomain,
+	validatorKey *keys.ValidatorKey,
+	includeBlobRecord *common.BlobRecord,
+	rejectBlobRecord *common.BlobRecord,
+) (bool, error) {
+	// Sign the blocks (original and equivocating) and generate the sidecars
+	signedBlockBlobsBundles, err := CreateSignEquivocatingBlock(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to create and sign equivocating block")
+	}
+
+	// Create a bundle of the original block but use the sidecars generated by the
+	// equivocating block
+	signedBlockSidecarBundle := &SignedBlockSidecarsBundle{
+		SignedBlock:  signedBlockBlobsBundles[0].SignedBlock,
+		BlobSidecars: signedBlockBlobsBundles[1].BlobSidecars,
+	}
+
+	// Broadcast the signed block and blobs
+	broadcaster := BundleBroadcaster{
+		Spec:       spec,
+		Peers:      testPeers,
+		BlobsFirst: s.BroadcastBlobsFirst,
+	}
+	if err := broadcaster.Broadcast(signedBlockSidecarBundle); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
+	}
+
+	return true, nil
+}
+
+type EquivocatingBlock struct {
+	Default
+	CorrectBlockDelayMilliseconds int `json:"correct_block_delay_milliseconds"`
+}
+
+func (s EquivocatingBlock) Name() string {
+	return "Equivocating Block"
+}
+
+func (s EquivocatingBlock) Description() string {
+	desc := fmt.Sprintf(dedent.Dedent(`
+	Equivocating Block:
+	- Create an equivocating block by modifying the graffiti
+	- Sign both blocks
+	- Generate the sidecars out of the correct block only
+	- Broadcast the blob sidecars
+	- Broadcast the equivocating signed block
+	- Insert a delay of %d milliseconds
+	- Broadcast the correct signed block
+	`), s.CorrectBlockDelayMilliseconds)
+	return desc
+}
+
+func (s EquivocatingBlock) Fields() map[string]interface{} {
+	return map[string]interface{}{}
+}
+
+func (s EquivocatingBlock) Execute(
+	spec *beacon_common.Spec,
+	testPeers p2p.TestPeers,
+	beaconBlockContents *deneb.BlockContents,
+	beaconBlockDomain beacon_common.BLSDomain,
+	validatorKey *keys.ValidatorKey,
+	includeBlobRecord *common.BlobRecord,
+	rejectBlobRecord *common.BlobRecord,
+) (bool, error) {
+	// Sign the blocks (original and equivocating) and generate the sidecars
+	signedBlockBlobsBundles, err := CreateSignEquivocatingBlock(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to create and sign equivocating block")
+	}
+
+	correctBlockBundle, equivocatingBlockBundle := signedBlockBlobsBundles[0], signedBlockBlobsBundles[1]
+
+	// Create a bundle of the original block but use the sidecars generated by the
+	// equivocating block
+	signedBlockSidecarBundle := &SignedBlockSidecarsBundle{
+		SignedBlock:  equivocatingBlockBundle.SignedBlock,
+		BlobSidecars: correctBlockBundle.BlobSidecars,
+	}
+
+	// Broadcast the signed block and blobs
+	broadcaster := BundleBroadcaster{
+		Spec:       spec,
+		Peers:      testPeers,
+		BlobsFirst: true,
+	}
+	if err := broadcaster.Broadcast(signedBlockSidecarBundle); err != nil {
+		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
+	}
+
+	// Insert a delay before gossiping the correct block
+	time.Sleep(time.Duration(s.CorrectBlockDelayMilliseconds) * time.Millisecond)
+
+	// Broadcast the correct block
+	if err := testPeers.BroadcastSignedBeaconBlock(spec, correctBlockBundle.SignedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
@@ -301,6 +426,8 @@ func (s EquivocatingBlockAndBlobs) Execute(
 
 /*
 TODO: Refactor all of this
+
+- Send all the correct blobs but with the equivocating block header
 
 type ExtraBlobs struct {
 	Default
@@ -691,7 +818,7 @@ func (s SwapBlobs) Execute(
 		return false, errors.Wrap(err, "failed to sign modified blobs")
 	}
 
-	// Broadcast the blobs first for the test to make sense
+	// Broadcast the blob sidecars first for the test to make sense
 	if s.SplitNetwork {
 		if err := MultiPeerSignedBlobBroadcast(spec, testPeers, [][]*eth.SignedBlobSidecar{signedBlobs, signedModifiedBlobs}); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed blob sidecars")
