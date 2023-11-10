@@ -139,6 +139,10 @@ func (s Default) Execute(
 	if err = broadcaster.Broadcast(signedBlockBlobsBundle); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block and blob sidecars")
 	}
+	if !s.SlotMiss(spec) {
+		// Add the blobs to the must-include blob record
+		includeBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundle.BlobSidecars...)
+	}
 	return true, nil
 }
 
@@ -197,6 +201,10 @@ func (s BlobGossipDelay) Execute(
 	}
 	if err = broadcaster.Broadcast(signedBlockBlobsBundle); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block and blob sidecars")
+	}
+	if !s.SlotMiss(spec) {
+		// Add the blobs to the must-include blob record
+		includeBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundle.BlobSidecars...)
 	}
 	return true, nil
 }
@@ -349,6 +357,10 @@ func (s EquivocatingBlockHeaderInBlobs) Execute(
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
+	// Add the blobs to the must-reject blob record
+	rejectBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundles[0].BlobSidecars...)
+	rejectBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundles[1].BlobSidecars...)
+
 	return true, nil
 }
 
@@ -373,6 +385,11 @@ func (s EquivocatingBlock) Description() string {
 	- Broadcast the correct signed block
 	`), s.CorrectBlockDelayMilliseconds)
 	return desc
+}
+
+func (s EquivocatingBlock) SlotMiss(spec *beacon_common.Spec) bool {
+	// Consider a slot miss only if the delay is more than half a slot
+	return s.CorrectBlockDelayMilliseconds >= int(spec.SECONDS_PER_SLOT*1000)/2
 }
 
 func (s EquivocatingBlock) Fields() map[string]interface{} {
@@ -419,6 +436,11 @@ func (s EquivocatingBlock) Execute(
 	// Broadcast the correct block
 	if err := testPeers.BroadcastSignedBeaconBlock(spec, correctBlockBundle.SignedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
+	}
+
+	if !s.SlotMiss(spec) {
+		// Add the blobs to the must-include blob record
+		includeBlobRecord.Add(beaconBlockContents.Block.Slot, correctBlockBundle.BlobSidecars...)
 	}
 
 	return true, nil
