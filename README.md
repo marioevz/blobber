@@ -2,6 +2,13 @@
 
 <img src="blobber_logo.png" width="200" height="200">
 
+## !! WARNING !!
+
+Running some of the actions included in this tool will get a validator **SLASHED**.
+
+Please exercise caution when using this tool and never use it on Mainnet!
+
+## Description
 
 Testing tool that sits as a proxy between the beacon and validator clients in order to intercept proposals, and then modify, delay, conceal or corrupt the blobs included in the proposal, which are then relayed to all the beacon clients via the DevP2P network.
 
