@@ -64,6 +64,7 @@ func main() {
 		validatorProxyPortStart           int
 		maxDevP2PSessionReuses            int
 		blobberID                         uint64
+		unsafeMode                        bool
 	)
 
 	flag.Var(
@@ -154,10 +155,21 @@ func main() {
 		"info",
 		"Sets the log level (trace, debug, info, warn, error, fatal, panic)",
 	)
+	flag.BoolVar(
+		&unsafeMode,
+		"enable-unsafe-mode",
+		false,
+		"Enable unsafe mode, only use this if you know what you're doing and never attempt to run this tool on mainnet.",
+	)
 
 	err := flag.CommandLine.Parse(os.Args[1:])
 	if err != nil {
 		panic(err)
+	}
+
+	if !unsafeMode {
+		fmt.Printf("WARNING: Some of the actions performed by this tool are unsafe and will get a validator SLASHED. Never run this tool on mainnet, and only run in test networks. If you know what you're doing, use the --enable-unsafe-mode flag to ignore this warning an proceed.\n\n")
+		os.Exit(1)
 	}
 
 	if len(clEndpoints) == 0 {
