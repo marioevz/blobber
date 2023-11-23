@@ -292,8 +292,6 @@ func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.B
 }
 
 func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *deneb.BlockContents, validatorKey *keys.ValidatorKey) (bool, error) {
-	// Log current action info
-	blockRoot := blResponse.Block.HashTreeRoot(b.Spec, tree.GetHashFn())
 
 	slotAction, err := b.getSlotAction(uint64(blResponse.Block.Slot))
 	if err != nil {
@@ -302,14 +300,6 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	if slotAction == nil {
 		panic("slot action is nil")
 	}
-
-	logrus.WithFields(logrus.Fields{
-		"slot":              blResponse.Block.Slot,
-		"block_root":        fmt.Sprintf("%x", blockRoot),
-		"parent_block_root": fmt.Sprintf("%x", blResponse.Block.ParentRoot),
-		"blob_count":        len(blResponse.Blobs),
-		"action_name":       slotAction.Name(),
-	}).Info("Preparing action for block and blobs")
 
 	slotActionFields := logrus.Fields(slotAction.Fields())
 	if len(slotActionFields) > 0 {
@@ -340,12 +330,15 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		}
 	}
 
-	// Modify the graffiti
-	graffitiModifier := &slot_actions.GraffitiModifier{
-		NewGraffiti: "Blobber",
-	}
-
-	graffitiModifier.ModifyBlock(b.Spec, blResponse.Block)
+	// Log current action info
+	blockRoot := blResponse.Block.HashTreeRoot(b.Spec, tree.GetHashFn())
+	logrus.WithFields(logrus.Fields{
+		"slot":              blResponse.Block.Slot,
+		"block_root":        blockRoot.String(),
+		"parent_block_root": blResponse.Block.ParentRoot.String(),
+		"blob_count":        len(blResponse.Blobs),
+		"action_name":       slotAction.Name(),
+	}).Info("Preparing action for block and blobs")
 
 	calcBeaconBlockDomain := b.calcBeaconBlockDomain(blResponse.Block.Slot)
 	executed, err := slotAction.Execute(
