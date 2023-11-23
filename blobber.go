@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/config"
+	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/marioevz/blobber/slot_actions"
 	"github.com/marioevz/blobber/validator_proxy"
@@ -21,11 +22,9 @@ import (
 	"github.com/protolambda/eth2api/client/beaconapi"
 	"github.com/protolambda/zrnt/eth2/beacon"
 	beacon_common "github.com/protolambda/zrnt/eth2/beacon/common"
+	"github.com/protolambda/zrnt/eth2/beacon/deneb"
 	"github.com/protolambda/ztyp/tree"
-	"github.com/prysmaticlabs/prysm/v4/beacon-chain/rpc/eth/shared"
 	"github.com/sirupsen/logrus"
-
-	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 )
 
 const (
@@ -80,7 +79,7 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 
 		Config: &config.Config{
 			TestP2P: &p2p.TestP2P{
-				ChainStatus: common.NewStatus(),
+				ChainStatus: p2p.NewStatus(),
 			},
 			Host:             DEFAULT_BLOBBER_HOST,
 			Port:             DEFAULT_BLOBBER_PORT,
@@ -172,7 +171,7 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient, validatorProxy
 
 	// Update the validators map
 	if b.ValidatorKeys == nil {
-		b.ValidatorKeys = make(map[beacon_common.ValidatorIndex]*config.ValidatorKey)
+		b.ValidatorKeys = make(map[beacon_common.ValidatorIndex]*keys.ValidatorKey)
 	}
 	validatorResponses, err := b.loadStateValidators(b.ctx, cl, eth2api.StateHead, nil, nil)
 	if err != nil {
@@ -227,7 +226,7 @@ func (b *Blobber) loadStateValidators(
 		validatorIndex := validatorResponse.Index
 		validatorPubkey := validatorResponse.Validator.Pubkey
 		for _, key := range b.ValidatorKeysList {
-			if bytes.Equal(key.ValidatorPubkey[:], validatorPubkey[:]) {
+			if bytes.Equal(key.PubKeyToBytes(), validatorPubkey[:]) {
 				b.ValidatorKeys[validatorIndex] = key
 				break
 			}
@@ -292,22 +291,7 @@ func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.B
 	)
 }
 
-func (b *Blobber) calcBlobSidecarDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
-	b.Spec.ForkVersion(slot)
-	return beacon_common.ComputeDomain(
-		beacon_common.DOMAIN_BLOB_SIDECAR,
-		b.Spec.ForkVersion(slot),
-		b.GenesisValidatorsRoot,
-	)
-}
-
-func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *eth.BeaconBlockAndBlobsDeneb, proposerKey *config.ValidatorKey) (bool, error) {
-	// Log current action info
-	blockRoot, err := blResponse.Block.HashTreeRoot()
-	if err != nil {
-		return false, errors.Wrap(err, "failed to get block hash tree root")
-	}
-
+func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *deneb.BlockContents, validatorKey *keys.ValidatorKey) (bool, error) {
 	slotAction, err := b.getSlotAction(uint64(blResponse.Block.Slot))
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get slot action")
@@ -315,14 +299,6 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 	if slotAction == nil {
 		panic("slot action is nil")
 	}
-
-	logrus.WithFields(logrus.Fields{
-		"slot":              blResponse.Block.Slot,
-		"block_root":        fmt.Sprintf("%x", blockRoot),
-		"parent_block_root": fmt.Sprintf("%x", blResponse.Block.ParentRoot),
-		"blob_count":        len(blResponse.Blobs),
-		"action_name":       slotAction.Name(),
-	}).Info("Preparing action for block and blobs")
 
 	slotActionFields := logrus.Fields(slotAction.Fields())
 	if len(slotActionFields) > 0 {
@@ -353,21 +329,29 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		}
 	}
 
-	calcBeaconBlockDomain := b.calcBeaconBlockDomain(beacon_common.Slot(blResponse.Block.Slot))
-	blobSidecarDomain := b.calcBlobSidecarDomain(beacon_common.Slot(blResponse.Block.Slot))
+	// Log current action info
+	blockRoot := blResponse.Block.HashTreeRoot(b.Spec, tree.GetHashFn())
+	logrus.WithFields(logrus.Fields{
+		"slot":              blResponse.Block.Slot,
+		"block_root":        blockRoot.String(),
+		"parent_block_root": blResponse.Block.ParentRoot.String(),
+		"blob_count":        len(blResponse.Blobs),
+		"action_name":       slotAction.Name(),
+	}).Info("Preparing action for block and blobs")
+
+	calcBeaconBlockDomain := b.calcBeaconBlockDomain(blResponse.Block.Slot)
 	executed, err := slotAction.Execute(
+		b.Spec,
 		testPeers,
-		blResponse.Block,
+		blResponse,
 		calcBeaconBlockDomain,
-		blResponse.Blobs,
-		blobSidecarDomain,
-		&proposerKey.ValidatorSecretKey,
+		validatorKey,
 		b.includeBlobRecord,
 		b.rejectBlobRecord,
 	)
 	if executed {
 		b.builtBlocksMap.Lock()
-		b.builtBlocksMap.BlockRoots[beacon_common.Slot(blResponse.Block.Slot)] = blockRoot
+		b.builtBlocksMap.BlockRoots[blResponse.Block.Slot] = blockRoot
 		b.builtBlocksMap.Unlock()
 	}
 	return executed, errors.Wrap(err, "failed to execute slot action")
@@ -392,9 +376,9 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 		if blockBlobResponse == nil {
 			return false, errors.Wrap(err, "response is nil")
 		}
-		var validatorKey *config.ValidatorKey
+		var validatorKey *keys.ValidatorKey
 		if b.ValidatorKeys != nil {
-			validatorKey = b.ValidatorKeys[beacon_common.ValidatorIndex(blockBlobResponse.Block.ProposerIndex)]
+			validatorKey = b.ValidatorKeys[blockBlobResponse.Block.ProposerIndex]
 		}
 		logrus.WithFields(logrus.Fields{
 			"proxy_id":               id,
@@ -432,10 +416,9 @@ type BlockDataStruct struct {
 	Data    json.RawMessage `json:"data"`
 }
 
-func ParseResponse(response []byte) (string, *eth.BeaconBlockAndBlobsDeneb, error) {
+func ParseResponse(response []byte) (string, *deneb.BlockContents, error) {
 	var (
 		blockDataStruct BlockDataStruct
-		err             error
 	)
 	if err := json.Unmarshal(response, &blockDataStruct); err != nil {
 		return blockDataStruct.Version, nil, errors.Wrap(err, "failed to unmarshal response into BlockDataStruct")
@@ -447,24 +430,10 @@ func ParseResponse(response []byte) (string, *eth.BeaconBlockAndBlobsDeneb, erro
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(blockDataStruct.Data))
-	data := new(shared.BeaconBlockContentsDeneb)
+	data := new(deneb.BlockContents)
 	if err := decoder.Decode(&data); err != nil {
 		return blockDataStruct.Version, nil, errors.Wrap(err, "failed to decode block contents")
 	}
 
-	beaconBlockContents := new(eth.BeaconBlockAndBlobsDeneb)
-
-	beaconBlockContents.Block, err = data.Block.ToConsensus()
-	if err != nil {
-		return blockDataStruct.Version, nil, err
-	}
-	beaconBlockContents.Blobs = make([]*eth.BlobSidecar, len(data.BlobSidecars))
-	for i, blob := range data.BlobSidecars {
-		beaconBlockContents.Blobs[i], err = blob.ToConsensus()
-		if err != nil {
-			return blockDataStruct.Version, nil, err
-		}
-	}
-
-	return blockDataStruct.Version, beaconBlockContents, nil
+	return blockDataStruct.Version, data, nil
 }

@@ -12,8 +12,10 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/pkg/errors"
+	"github.com/protolambda/zrnt/eth2/beacon/common"
+	"github.com/protolambda/zrnt/eth2/beacon/deneb"
+	"github.com/protolambda/ztyp/tree"
 	fastssz "github.com/prysmaticlabs/fastssz"
-	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
 	"github.com/sirupsen/logrus"
 )
 
@@ -67,7 +69,7 @@ func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, []byte, error) {
 	return b, s.Sum(nil)[:20], nil
 }
 
-func (p *TestPeer) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
+func (p *TestPeer) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlock *deneb.SignedBeaconBlock) error {
 	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
 	defer cancel()
 	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
@@ -76,7 +78,7 @@ func (p *TestPeer) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.S
 
 	topic := signedBeaconBlockToTopic(p.state.GetForkDigest(), sszNetworkEncoder.ProtocolSuffix())
 
-	buf, messageID, err := EncodeGossip(topic, signedBeaconBlockDeneb)
+	buf, messageID, err := EncodeGossip(topic, WrapSpecObject(spec, signedBeaconBlock))
 	if err != nil {
 		return errors.Wrap(err, "failed to encode signed beacon block deneb")
 	}
@@ -87,21 +89,19 @@ func (p *TestPeer) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.S
 	if err != nil {
 		return errors.Wrap(err, "failed to join topic")
 	}
-	blockRoot, err := signedBeaconBlockDeneb.Block.HashTreeRoot()
-	if err != nil {
-		return errors.Wrap(err, "failed to get block hash tree root")
-	}
+	blockRoot := signedBeaconBlock.Message.HashTreeRoot(spec, tree.GetHashFn())
 	debugFields := logrus.Fields{
 		"id":         p.ID,
 		"topic":      topic,
-		"block_root": fmt.Sprintf("%x", blockRoot),
-		"slot":       signedBeaconBlockDeneb.Block.Slot,
-		"signature":  fmt.Sprintf("%x", signedBeaconBlockDeneb.Signature),
+		"block_root": blockRoot.String(),
+		"state_root": signedBeaconBlock.Message.StateRoot.String(),
+		"slot":       signedBeaconBlock.Message.Slot,
+		"signature":  signedBeaconBlock.Signature.String(),
 		"message_id": fmt.Sprintf("%x", messageID),
 	}
 
-	for i, blobKzg := range signedBeaconBlockDeneb.Block.Body.BlobKzgCommitments {
-		debugFields[fmt.Sprintf("blob_kzg_commitment_%d", i)] = fmt.Sprintf("%x", blobKzg)
+	for i, blobKzg := range signedBeaconBlock.Message.Body.BlobKZGCommitments {
+		debugFields[fmt.Sprintf("blob_kzg_commitment_%d", i)] = blobKzg.String()
 	}
 
 	logrus.WithFields(debugFields).Debug("Broadcasting signed beacon block deneb")
@@ -112,16 +112,16 @@ func (p *TestPeer) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.S
 	return topicHandle.Close()
 }
 
-func (p TestPeers) BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb *eth.SignedBeaconBlockDeneb) error {
+func (p TestPeers) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlockDeneb *deneb.SignedBeaconBlock) error {
 	for _, p2p := range p {
-		if err := p2p.BroadcastSignedBeaconBlockDeneb(signedBeaconBlockDeneb); err != nil {
+		if err := p2p.BroadcastSignedBeaconBlock(spec, signedBeaconBlockDeneb); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (p *TestPeer) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar, subnet *uint64) error {
+func (p *TestPeer) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
 	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
 	defer cancel()
 	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
@@ -132,12 +132,13 @@ func (p *TestPeer) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobS
 		// By default broadcast to the blob subnet of the index of the sidecar
 		// TODO: This is not entirely correct, this is only correct because the
 		//       subnet count is equal to the max blob sidecar count.
-		subnet = &signedBlobSidecar.Message.Index
+		index := uint64(blobSidecar.Index)
+		subnet = &index
 	}
 
 	topic := blobSubnetToTopic(*subnet, p.state.GetForkDigest(), sszNetworkEncoder.ProtocolSuffix())
 
-	buf, messageID, err := EncodeGossip(topic, signedBlobSidecar)
+	buf, messageID, err := EncodeGossip(topic, WrapSpecObject(spec, blobSidecar))
 	if err != nil {
 		return errors.Wrap(err, "failed to encode signed blob sidecar")
 	}
@@ -148,16 +149,17 @@ func (p *TestPeer) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobS
 	if err != nil {
 		return errors.Wrap(err, "failed to join topic")
 	}
+
+	blockRoot := blobSidecar.SignedBlockHeader.Message.HashTreeRoot(tree.GetHashFn())
 	logrus.WithFields(logrus.Fields{
 		"id":             p.ID,
 		"topic":          topic,
-		"block_root":     fmt.Sprintf("%x", signedBlobSidecar.Message.BlockRoot),
-		"index":          signedBlobSidecar.Message.Index,
-		"slot":           signedBlobSidecar.Message.Slot,
-		"kzg_commitment": fmt.Sprintf("%x", signedBlobSidecar.Message.KzgCommitment),
-		"signature":      fmt.Sprintf("%x", signedBlobSidecar.Signature),
+		"block_root":     blockRoot.String(),
+		"index":          blobSidecar.Index,
+		"slot":           blobSidecar.SignedBlockHeader.Message.Slot,
+		"kzg_commitment": blobSidecar.KZGCommitment.String(),
 		"message_id":     fmt.Sprintf("%x", messageID),
-	}).Debug("Broadcasting signed blob sidecar")
+	}).Debug("Broadcasting blob sidecar with signed block header")
 
 	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
 		return errors.Wrap(err, "failed to publish topic")
@@ -165,27 +167,27 @@ func (p *TestPeer) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobS
 	return topicHandle.Close()
 }
 
-func (p *TestPeer) BroadcastSignedBlobSidecars(signedBlobSidecars []*eth.SignedBlobSidecar) error {
-	for _, signedBlobSidecar := range signedBlobSidecars {
-		if err := p.BroadcastSignedBlobSidecar(signedBlobSidecar, nil); err != nil {
+func (p *TestPeer) BroadcastBlobSidecars(spec *common.Spec, blobSidecars ...*deneb.BlobSidecar) error {
+	for _, blobSidecar := range blobSidecars {
+		if err := p.BroadcastBlobSidecar(spec, blobSidecar, nil); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (p TestPeers) BroadcastSignedBlobSidecar(signedBlobSidecar *eth.SignedBlobSidecar, subnet *uint64) error {
+func (p TestPeers) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
 	for _, p2p := range p {
-		if err := p2p.BroadcastSignedBlobSidecar(signedBlobSidecar, subnet); err != nil {
+		if err := p2p.BroadcastBlobSidecar(spec, blobSidecar, subnet); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (p TestPeers) BroadcastSignedBlobSidecars(signedBlobSidecars []*eth.SignedBlobSidecar) error {
+func (p TestPeers) BroadcastBlobSidecars(spec *common.Spec, blobSidecars ...*deneb.BlobSidecar) error {
 	for _, p2p := range p {
-		if err := p2p.BroadcastSignedBlobSidecars(signedBlobSidecars); err != nil {
+		if err := p2p.BroadcastBlobSidecars(spec, blobSidecars...); err != nil {
 			return err
 		}
 	}

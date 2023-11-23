@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/marioevz/blobber/slot_actions"
 	beacon "github.com/protolambda/zrnt/eth2/beacon/common"
@@ -25,8 +26,8 @@ type Config struct {
 	ExternalIP                   net.IP
 	BeaconGenesisTime            beacon.Timestamp
 	GenesisValidatorsRoot        tree.Root
-	ValidatorKeys                map[beacon.ValidatorIndex]*ValidatorKey
-	ValidatorKeysList            []*ValidatorKey
+	ValidatorKeys                map[beacon.ValidatorIndex]*keys.ValidatorKey
+	ValidatorKeysList            []*keys.ValidatorKey
 	AlwaysErrorValidatorResponse bool
 
 	ValidatorLoadTimeoutSeconds int
@@ -201,7 +202,7 @@ func WithGenesisValidatorsRoot(t tree.Root) Option {
 	}
 }
 
-func WithValidatorKeys(vk map[beacon.ValidatorIndex]*ValidatorKey) Option {
+func WithValidatorKeys(vk map[beacon.ValidatorIndex]*keys.ValidatorKey) Option {
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()
@@ -213,7 +214,7 @@ func WithValidatorKeys(vk map[beacon.ValidatorIndex]*ValidatorKey) Option {
 	}
 }
 
-func WithValidatorKeysList(vk []*ValidatorKey) Option {
+func WithValidatorKeysList(vk []*keys.ValidatorKey) Option {
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()
@@ -228,7 +229,7 @@ func WithValidatorKeysList(vk []*ValidatorKey) Option {
 func WithValidatorKeysListFromFile(path string) Option {
 	return Option{
 		apply: func(cfg *Config) error {
-			vk, err := KeyListFromFile(path)
+			vk, err := keys.KeyListFromFile(path)
 			if err != nil {
 				return err
 			}
@@ -244,7 +245,7 @@ func WithValidatorKeysListFromFile(path string) Option {
 func WithValidatorKeysListFromFolder(path string) Option {
 	return Option{
 		apply: func(cfg *Config) error {
-			vk, err := KeyListFromFolder(path)
+			vk, err := keys.KeyListFromFolder(path)
 			if err != nil {
 				return err
 			}

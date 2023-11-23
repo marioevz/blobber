@@ -10,8 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/marioevz/blobber/common"
-
 	gcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
@@ -25,17 +23,13 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/pkg/errors"
-	eth "github.com/prysmaticlabs/prysm/v4/proto/prysm/v1alpha1"
+	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/sirupsen/logrus"
 
 	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v4/consensus-types/primitives"
 )
 
 var sszNetworkEncoder = encoder.SszNetworkEncoder{}
-
-type Goodbye = primitives.SSZUint64
-type PingData = primitives.SSZUint64
 
 const (
 	StatusProtocolID   = "/eth2/beacon_chain/req/status/1/" + encoder.ProtocolSuffixSSZSnappy
@@ -51,7 +45,7 @@ type TestP2P struct {
 	peerCounter atomic.Uint64
 
 	// State objects
-	ChainStatus  *common.Status
+	ChainStatus  *Status
 	lastTestPeer TestPeers
 	testPeerUses int
 
@@ -110,8 +104,8 @@ type TestPeer struct {
 
 	ctx      context.Context
 	cancel   context.CancelFunc
-	MetaData *eth.MetaDataV1
-	state    *common.Status
+	MetaData *common.MetaData
+	state    *Status
 }
 
 type TestPeers []*TestPeer
@@ -244,10 +238,10 @@ func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error
 		PrivateKey: priv,
 		PublicKey:  pub,
 		LocalNode:  localNode,
-		MetaData: &eth.MetaDataV1{
+		MetaData: &common.MetaData{
 			SeqNumber: 0,
-			Attnets:   make([]byte, 8),
-			Syncnets:  make([]byte, 1),
+			Attnets:   common.AttnetBits{},
+			Syncnets:  common.SyncnetBits{},
 		},
 
 		state: t.ChainStatus,
@@ -302,15 +296,15 @@ func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 		"id":              p.ID,
 		"protocol":        s.Protocol(),
 		"peer":            s.Conn().RemotePeer().String(),
-		"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
-		"finalized_root":  fmt.Sprintf("%x", p.state.FinalizedRoot),
+		"fork_digest":     p.state.ForkDigest.String(),
+		"finalized_root":  p.state.FinalizedRoot.String(),
 		"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
-		"head_root":       fmt.Sprintf("%x", p.state.HeadRoot),
+		"head_root":       p.state.HeadRoot.String(),
 		"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
 	}).Debug("Sending initial status")
 
 	// Send request
-	if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, p.state); err != nil {
+	if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(p.state)); err != nil {
 		return errors.Wrap(err, "failed to encode outgoing message")
 	}
 	// Done sending request
@@ -373,7 +367,7 @@ func (p *TestPeer) SetupStreams() error {
 		}).Debug("Got a new stream")
 		// Read the incoming message into the appropriate struct.
 		var out common.Status
-		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &out); err != nil {
+		if err := sszNetworkEncoder.DecodeWithMaxLength(s, WrapSSZObject(&out)); err != nil {
 			logrus.WithError(err).Error("Failed to decode incoming message")
 			return
 		}
@@ -382,10 +376,10 @@ func (p *TestPeer) SetupStreams() error {
 			"id":              p.ID,
 			"protocol":        s.Protocol(),
 			"peer":            s.Conn().RemotePeer().String(),
-			"fork_digest":     fmt.Sprintf("%x", out.ForkDigest),
-			"finalized_root":  fmt.Sprintf("%x", out.FinalizedRoot),
+			"fork_digest":     out.ForkDigest.String(),
+			"finalized_root":  out.FinalizedRoot.String(),
 			"finalized_epoch": fmt.Sprintf("%d", out.FinalizedEpoch),
-			"head_root":       fmt.Sprintf("%x", out.HeadRoot),
+			"head_root":       out.HeadRoot.String(),
 			"head_slot":       fmt.Sprintf("%d", out.HeadSlot),
 		}).Debug("Received data")
 
@@ -398,10 +392,10 @@ func (p *TestPeer) SetupStreams() error {
 			"id":              p.ID,
 			"protocol":        s.Protocol(),
 			"peer":            s.Conn().RemotePeer().String(),
-			"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
-			"finalized_root":  fmt.Sprintf("%x", p.state.FinalizedRoot),
+			"fork_digest":     p.state.ForkDigest.String(),
+			"finalized_root":  p.state.FinalizedRoot.String(),
 			"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
-			"head_root":       fmt.Sprintf("%x", p.state.HeadRoot),
+			"head_root":       p.state.HeadRoot.String(),
 			"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
 		}).Debug("Response data")
 
@@ -410,7 +404,7 @@ func (p *TestPeer) SetupStreams() error {
 			logrus.WithError(err).Error("Failed to send status response")
 			return
 		}
-		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, p.state); err != nil {
+		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(p.state)); err != nil {
 			logrus.WithError(err).Error("Failed to encode outgoing message")
 			return
 		} else {
@@ -434,8 +428,8 @@ func (p *TestPeer) SetupStreams() error {
 			"peer":     s.Conn().RemotePeer().String(),
 		}).Debug("Got a new stream")
 		// Read the incoming message into the appropriate struct.
-		var out Goodbye
-		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &out); err != nil {
+		var out common.Goodbye
+		if err := sszNetworkEncoder.DecodeWithMaxLength(s, WrapSSZObject(&out)); err != nil {
 			logrus.WithError(err).Error("Failed to decode incoming message")
 			return
 		}
@@ -448,14 +442,14 @@ func (p *TestPeer) SetupStreams() error {
 		}).Debug("Received data")
 
 		// Construct response
-		var resp Goodbye
+		var resp common.Goodbye
 
 		// Send response
 		if _, err := s.Write([]byte{0x00}); err != nil {
 			logrus.WithError(err).Error("Failed to send status response")
 			return
 		}
-		if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, &resp); err != nil {
+		if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(&resp)); err != nil {
 			logrus.WithError(err).Error("Failed to encode outgoing message")
 			return
 		}
@@ -478,8 +472,8 @@ func (p *TestPeer) SetupStreams() error {
 			"peer":     s.Conn().RemotePeer().String(),
 		}).Debug("Got a new stream")
 		// Read the incoming message into the appropriate struct.
-		var out PingData
-		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &out); err != nil {
+		var out common.PingData
+		if err := sszNetworkEncoder.DecodeWithMaxLength(s, WrapSSZObject(&out)); err != nil {
 			logrus.WithError(err).Error("Failed to decode incoming message")
 			return
 		}
@@ -492,13 +486,13 @@ func (p *TestPeer) SetupStreams() error {
 		}).Debug("Received data")
 
 		// Construct response
-		resp := PingData(p.MetaData.SeqNumber)
+		resp := common.PingData(p.MetaData.SeqNumber)
 		// Send response
 		if _, err := s.Write([]byte{0x00}); err != nil {
 			logrus.WithError(err).Error("Failed to send status response")
 			return
 		}
-		if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, &resp); err != nil {
+		if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(&resp)); err != nil {
 			logrus.WithError(err).Error("Failed to encode outgoing message")
 			return
 		}
@@ -531,7 +525,7 @@ func (p *TestPeer) SetupStreams() error {
 		} else {
 			totalBytesWritten += n
 		}
-		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, resp); err != nil {
+		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(resp)); err != nil {
 			logrus.WithError(err).Error("Failed to encode outgoing message")
 			return
 		} else {
@@ -559,11 +553,11 @@ func (p *TestPeer) Goodbye(ctx context.Context, peer peer.ID) error {
 		return errors.Wrap(err, "failed to open stream")
 	}
 
-	var resp Goodbye
+	var resp common.Goodbye
 	if _, err := s.Write([]byte{0x00}); err != nil {
 		return errors.Wrap(err, "failed write response chunk byte")
 	}
-	if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, &resp); err != nil {
+	if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(&resp)); err != nil {
 		return errors.Wrap(err, "failed write goodbye message")
 	}
 
