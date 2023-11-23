@@ -84,20 +84,16 @@ func (s Default) Name() string {
 
 func (s Default) Description() string {
 	desc := dedent.Dedent(`
-		Default block and blob gossiping behaviour:
 		- Sign the block
-		- Generate the blob sidecars
-	`)
+		- Generate the blob sidecars using signed header`)
 	if s.BroadcastBlobsFirst {
 		desc += dedent.Dedent(`
 		- Broadcast the blob sidecars
-		- Broadcast the block
-	`)
+		- Broadcast the block`)
 	} else {
 		desc += dedent.Dedent(`
 		- Broadcast the block
-		- Broadcast the blob sidecars
-	`)
+		- Broadcast the blob sidecars`)
 	}
 	return desc
 }
@@ -157,13 +153,11 @@ func (s BlobGossipDelay) Name() string {
 
 func (s BlobGossipDelay) Description() string {
 	return fmt.Sprintf(dedent.Dedent(`
-		Insert a delay before gossiping the blobs:
 		- Sign the block
-		- Generate the blob sidecars
+		- Generate the blob sidecars using signed header
 		- Broadcast the block
 		- Insert a delay of %d milliseconds
-		- Broadcast the blob sidecars
-	`), s.DelayMilliseconds)
+		- Broadcast the blob sidecars`), s.DelayMilliseconds)
 }
 
 func (s BlobGossipDelay) SlotMiss(spec *beacon_common.Spec) bool {
@@ -223,26 +217,21 @@ func (s EquivocatingBlockAndBlobs) Name() string {
 
 func (s EquivocatingBlockAndBlobs) Description() string {
 	desc := dedent.Dedent(`
-	Equivocating block and blobs:
 	- Create an equivocating block by modifying the graffiti
 	- Sign both blocks
-	- Generate the sidecars for both blocks
-	`)
+	- Generate blob sidecars for both blocks`)
 	if s.BroadcastBlobsFirst {
 		desc += dedent.Dedent(`
 		- Broadcast the blob sidecars for both blocks to different peers
-		- Broadcast the signed blocks to different peers
-	`)
+		- Broadcast the signed blocks to different peers`)
 	} else {
 		desc += dedent.Dedent(`
 		- Broadcast the signed blocks to different peers
-		- Broadcast the blob sidecars for both blocks to different peers
-	`)
+		- Broadcast the blob sidecars for both blocks to different peers`)
 	}
 	if s.AlternateRecipients {
 		desc += dedent.Dedent(`
-		- Alternate the recipients of the blocks and blobs every time the action is executed
-	`)
+		- Alternate the recipients of the blocks and blobs every time the action is executed`)
 	}
 	return desc
 }
@@ -302,21 +291,17 @@ func (s EquivocatingBlockHeaderInBlobs) Name() string {
 
 func (s EquivocatingBlockHeaderInBlobs) Description() string {
 	desc := dedent.Dedent(`
-	Equivocating Block Header in Blobs:
 	- Create an equivocating block by modifying the graffiti
 	- Sign both blocks
-	- Generate the sidecars out of the equivocating block only
-	`)
+	- Generate the sidecars out of the equivocating signed block only`)
 	if s.BroadcastBlobsFirst {
 		desc += dedent.Dedent(`
 		- Broadcast the blob sidecars
-		- Broadcast the first signed block only
-	`)
+		- Broadcast the first signed block only`)
 	} else {
 		desc += dedent.Dedent(`
 		- Broadcast the first signed block only
-		- Broadcast the blob sidecars
-	`)
+		- Broadcast the blob sidecars`)
 	}
 	return desc
 }
@@ -375,15 +360,13 @@ func (s EquivocatingBlock) Name() string {
 
 func (s EquivocatingBlock) Description() string {
 	desc := fmt.Sprintf(dedent.Dedent(`
-	Equivocating Block:
 	- Create an equivocating block by modifying the graffiti
 	- Sign both blocks
 	- Generate the sidecars out of the correct block only
 	- Broadcast the blob sidecars
 	- Broadcast the equivocating signed block
 	- Insert a delay of %d milliseconds
-	- Broadcast the correct signed block
-	`), s.CorrectBlockDelayMilliseconds)
+	- Broadcast the correct signed block`), s.CorrectBlockDelayMilliseconds)
 	return desc
 }
 
@@ -445,6 +428,19 @@ func (s EquivocatingBlock) Execute(
 
 	return true, nil
 }
+
+type InvalidBlobSidecar struct {
+	Default
+}
+
+/*
+Invalidation types:
+- blob_sidecar.index >= MAX_BLOBS_PER_BLOCK
+- Invalid subnet
+- blob_sidecar.signed_block_header.signature is invalid
+- Invalidate sidecar inclusion proof
+- Invalidate sidecar kzg commitment
+*/
 
 /*
 TODO: Refactor all of this

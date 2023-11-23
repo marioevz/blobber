@@ -93,14 +93,15 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlo
 	debugFields := logrus.Fields{
 		"id":         p.ID,
 		"topic":      topic,
-		"block_root": fmt.Sprintf("%x", blockRoot),
+		"block_root": blockRoot.String(),
+		"state_root": signedBeaconBlock.Message.StateRoot.String(),
 		"slot":       signedBeaconBlock.Message.Slot,
-		"signature":  fmt.Sprintf("%x", signedBeaconBlock.Signature),
+		"signature":  signedBeaconBlock.Signature.String(),
 		"message_id": fmt.Sprintf("%x", messageID),
 	}
 
 	for i, blobKzg := range signedBeaconBlock.Message.Body.BlobKZGCommitments {
-		debugFields[fmt.Sprintf("blob_kzg_commitment_%d", i)] = fmt.Sprintf("%x", blobKzg)
+		debugFields[fmt.Sprintf("blob_kzg_commitment_%d", i)] = blobKzg.String()
 	}
 
 	logrus.WithFields(debugFields).Debug("Broadcasting signed beacon block deneb")
@@ -153,12 +154,12 @@ func (p *TestPeer) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.Bl
 	logrus.WithFields(logrus.Fields{
 		"id":             p.ID,
 		"topic":          topic,
-		"block_root":     fmt.Sprintf("%x", blockRoot),
+		"block_root":     blockRoot.String(),
 		"index":          blobSidecar.Index,
 		"slot":           blobSidecar.SignedBlockHeader.Message.Slot,
-		"kzg_commitment": fmt.Sprintf("%x", blobSidecar.KZGCommitment),
+		"kzg_commitment": blobSidecar.KZGCommitment.String(),
 		"message_id":     fmt.Sprintf("%x", messageID),
-	}).Debug("Broadcasting signed blob sidecar")
+	}).Debug("Broadcasting blob sidecar with signed block header")
 
 	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
 		return errors.Wrap(err, "failed to publish topic")

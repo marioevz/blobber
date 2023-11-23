@@ -296,10 +296,10 @@ func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 		"id":              p.ID,
 		"protocol":        s.Protocol(),
 		"peer":            s.Conn().RemotePeer().String(),
-		"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
-		"finalized_root":  fmt.Sprintf("%x", p.state.FinalizedRoot),
+		"fork_digest":     p.state.ForkDigest.String(),
+		"finalized_root":  p.state.FinalizedRoot.String(),
 		"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
-		"head_root":       fmt.Sprintf("%x", p.state.HeadRoot),
+		"head_root":       p.state.HeadRoot.String(),
 		"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
 	}).Debug("Sending initial status")
 
@@ -376,10 +376,10 @@ func (p *TestPeer) SetupStreams() error {
 			"id":              p.ID,
 			"protocol":        s.Protocol(),
 			"peer":            s.Conn().RemotePeer().String(),
-			"fork_digest":     fmt.Sprintf("%x", out.ForkDigest),
-			"finalized_root":  fmt.Sprintf("%x", out.FinalizedRoot),
+			"fork_digest":     out.ForkDigest.String(),
+			"finalized_root":  out.FinalizedRoot.String(),
 			"finalized_epoch": fmt.Sprintf("%d", out.FinalizedEpoch),
-			"head_root":       fmt.Sprintf("%x", out.HeadRoot),
+			"head_root":       out.HeadRoot.String(),
 			"head_slot":       fmt.Sprintf("%d", out.HeadSlot),
 		}).Debug("Received data")
 
@@ -392,10 +392,10 @@ func (p *TestPeer) SetupStreams() error {
 			"id":              p.ID,
 			"protocol":        s.Protocol(),
 			"peer":            s.Conn().RemotePeer().String(),
-			"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
-			"finalized_root":  fmt.Sprintf("%x", p.state.FinalizedRoot),
+			"fork_digest":     p.state.ForkDigest.String(),
+			"finalized_root":  p.state.FinalizedRoot.String(),
 			"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
-			"head_root":       fmt.Sprintf("%x", p.state.HeadRoot),
+			"head_root":       p.state.HeadRoot.String(),
 			"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
 		}).Debug("Response data")
 
