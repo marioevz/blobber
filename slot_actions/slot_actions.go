@@ -205,10 +205,10 @@ func (s BlobGossipDelay) Execute(
 
 type EquivocatingBlockAndBlobs struct {
 	Default
-	BroadcastBlobsFirst bool
-	// TODO: ModifyBlobs         bool
-	// TODO: ModifyKZGProofs     bool
-	AlternateRecipients bool
+	BroadcastBlobsFirst bool `json:"broadcast_blobs_first"`
+	// TODO: ModifyBlobs         bool `json:"modify_blobs"`
+	// TODO: ModifyKZGProofs     bool `json:"modify_kzg_proofs"`
+	AlternateRecipients bool `json:"alternate_recipients"`
 }
 
 func (s EquivocatingBlockAndBlobs) Name() string {
@@ -282,7 +282,7 @@ func (s EquivocatingBlockAndBlobs) Execute(
 
 type EquivocatingBlockHeaderInBlobs struct {
 	Default
-	BroadcastBlobsFirst bool
+	BroadcastBlobsFirst bool `json:"broadcast_blobs_first"`
 }
 
 func (s EquivocatingBlockHeaderInBlobs) Name() string {

@@ -40,44 +40,56 @@ func TestSlotActionsJsonParsing(t *testing.T) {
 			t.Fatalf("UnmarshallSlotAction() delay_milliseconds = %d", actCast.DelayMilliseconds)
 		}
 	}
-	/*
-		TODO: Refactor this test
 
-		jsonString = `{
-			"name": "extra_blobs",
-			"incorrect_kzg_commitment": true
+	jsonString = `{
+		"name": "equivocating_block_and_blobs",
+		"broadcast_blobs_first": true,
+		"alternate_recipients": true
+	}`
+	act, err = slot_actions.UnmarshallSlotAction([]byte(jsonString))
+	if err != nil {
+		t.Fatalf("UnmarshallSlotAction() error = %v", err)
+	}
+	if actCast, ok := act.(*slot_actions.EquivocatingBlockAndBlobs); !ok {
+		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
+	} else {
+		if actCast.BroadcastBlobsFirst != true {
+			t.Fatalf("UnmarshallSlotAction() broadcast_blobs_first = %t", actCast.BroadcastBlobsFirst)
 		}
-		`
-		act, err = slot_actions.UnmarshallSlotAction([]byte(jsonString))
-		if err != nil {
-			t.Fatalf("UnmarshallSlotAction() error = %v", err)
+		if actCast.AlternateRecipients != true {
+			t.Fatalf("UnmarshallSlotAction() alternate_recipients = %t", actCast.AlternateRecipients)
 		}
-		if extraBlobs, ok := act.(*slot_actions.ExtraBlobs); !ok {
-			t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
-		} else {
-			if extraBlobs.IncorrectKZGCommitment != true {
-				t.Fatalf("UnmarshallSlotAction() incorrect_kzg_commitment = %t", extraBlobs.IncorrectKZGCommitment)
-			}
+	}
+
+	jsonString = `{
+		"name": "equivocating_block_header_in_blobs",
+		"broadcast_blobs_first": true
+	}`
+	act, err = slot_actions.UnmarshallSlotAction([]byte(jsonString))
+	if err != nil {
+		t.Fatalf("UnmarshallSlotAction() error = %v", err)
+	}
+	if actCast, ok := act.(*slot_actions.EquivocatingBlockHeaderInBlobs); !ok {
+		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
+	} else {
+		if actCast.BroadcastBlobsFirst != true {
+			t.Fatalf("UnmarshallSlotAction() broadcast_blobs_first = %t", actCast.BroadcastBlobsFirst)
 		}
-		jsonString = `{
-			"name": "conflicting_blobs",
-			"conflicting_blobs_count": 6,
-			"alternate_blob_recipients": true
+	}
+
+	jsonString = `{
+		"name": "equivocating_block",
+		"correct_block_delay_milliseconds": 1000
+	}`
+	act, err = slot_actions.UnmarshallSlotAction([]byte(jsonString))
+	if err != nil {
+		t.Fatalf("UnmarshallSlotAction() error = %v", err)
+	}
+	if actCast, ok := act.(*slot_actions.EquivocatingBlock); !ok {
+		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
+	} else {
+		if actCast.CorrectBlockDelayMilliseconds != 1000 {
+			t.Fatalf("UnmarshallSlotAction() correct_block_delay_milliseconds = %d", actCast.CorrectBlockDelayMilliseconds)
 		}
-		`
-		act, err = slot_actions.UnmarshallSlotAction([]byte(jsonString))
-		if err != nil {
-			t.Fatalf("UnmarshallSlotAction() error = %v", err)
-		}
-		if conflictingBlobs, ok := act.(*slot_actions.ConflictingBlobs); !ok {
-			t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
-		} else {
-			if conflictingBlobs.ConflictingBlobsCount != 6 {
-				t.Fatalf("UnmarshallSlotAction() conflicting_blobs_count = %d", conflictingBlobs.ConflictingBlobsCount)
-			}
-			if conflictingBlobs.AlternateBlobRecipients != true {
-				t.Fatalf("UnmarshallSlotAction() alternate_blob_recipients = %t", conflictingBlobs.AlternateBlobRecipients)
-			}
-		}
-	*/
+	}
 }
