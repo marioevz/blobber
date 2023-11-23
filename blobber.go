@@ -292,7 +292,6 @@ func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.B
 }
 
 func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *deneb.BlockContents, validatorKey *keys.ValidatorKey) (bool, error) {
-
 	slotAction, err := b.getSlotAction(uint64(blResponse.Block.Slot))
 	if err != nil {
 		return false, errors.Wrap(err, "failed to get slot action")
