@@ -88,4 +88,20 @@ func TestSlotActionsJsonParsing(t *testing.T) {
 	if _, ok := act.(*slot_actions.InvalidEquivocatingBlock); !ok {
 		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
 	}
+
+	jsonString = `{
+		"name": "equivocating_blob_sidecars",
+		"broadcast_blobs_first": true
+	}`
+	act, err = slot_actions.UnmarshallSlotAction([]byte(jsonString))
+	if err != nil {
+		t.Fatalf("UnmarshallSlotAction() error = %v", err)
+	}
+	if actCast, ok := act.(*slot_actions.EquivocatingBlobSidecars); !ok {
+		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
+	} else {
+		if actCast.BroadcastBlobsFirst != true {
+			t.Fatalf("UnmarshallSlotAction() broadcast_blobs_first = %t", actCast.BroadcastBlobsFirst)
+		}
+	}
 }
