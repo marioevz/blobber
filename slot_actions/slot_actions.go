@@ -296,12 +296,12 @@ func (s EquivocatingBlockHeaderInBlobs) Description() string {
 	- Generate the sidecars out of the equivocating signed block only`)
 	if s.BroadcastBlobsFirst {
 		desc += dedent.Dedent(`
-		- Broadcast the blob sidecars
-		- Broadcast the first signed block only`)
+		- Broadcast the blob sidecars with the equivocating block header
+		- Broadcast the original signed block only`)
 	} else {
 		desc += dedent.Dedent(`
-		- Broadcast the first signed block only
-		- Broadcast the blob sidecars`)
+		- Broadcast the original signed block only
+		- Broadcast the blob sidecars with the equivocating block header`)
 	}
 	return desc
 }
