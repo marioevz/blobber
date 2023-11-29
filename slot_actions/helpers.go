@@ -2,6 +2,7 @@ package slot_actions
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/zrnt/eth2/beacon/deneb"
 	"github.com/protolambda/ztyp/tree"
+	"github.com/sirupsen/logrus"
 )
 
 func VerifySignature(domain common.BLSDomain, root common.Root, pubKey *blsu.Pubkey, signature common.BLSSignature) (bool, error) {
@@ -74,9 +76,16 @@ func CreateSignEquivocatingBlock(
 	// Modify the graffiti to generate a different block
 	graffitiModifier := &GraffitiModifier{
 		NewGraffiti: "Equiv",
-		Append:      true,
 	}
-	graffitiModifier.ModifyBlock(spec, equivocatingBlockContents.Block)
+	if err := graffitiModifier.ModifyBlock(spec, equivocatingBlockContents.Block); err != nil {
+		return nil, errors.Wrap(err, "failed to modify block")
+	}
+	logrus.WithFields(
+		logrus.Fields{
+			"beacon_block_root": beaconBlockContents.Block.HashTreeRoot(spec, tree.GetHashFn()).String(),
+			"equiv_block_root":  equivocatingBlockContents.Block.HashTreeRoot(spec, tree.GetHashFn()).String(),
+		},
+	).Debug("created equivocating block")
 
 	beaconBlocksContents := []*deneb.BlockContents{
 		beaconBlockContents,
@@ -284,7 +293,7 @@ type GraffitiModifier struct {
 
 func TextToRoot(s string) (root tree.Root, err error) {
 	if len([]byte(s)) > len(root) {
-		err = errors.New("text is too long to fit in a root")
+		err = fmt.Errorf("text is too long to fit in a root: %s", s)
 		return
 	}
 	copy(root[:], []byte(s))
@@ -307,7 +316,7 @@ func (gm *GraffitiModifier) ModifyBlock(spec *common.Spec, block interface{}) er
 				return err
 			}
 		default:
-			return errors.New("block is not a signed beacon block")
+			return fmt.Errorf("block has incorrect type: %T", block)
 		}
 		prefix += " - "
 	}
@@ -318,9 +327,12 @@ func (gm *GraffitiModifier) ModifyBlock(spec *common.Spec, block interface{}) er
 	}
 	switch b := block.(type) {
 	case *deneb.BeaconBlock:
+		if bytes.Equal(b.Body.Graffiti[:], newRoot[:]) {
+			return fmt.Errorf("new graffiti and old graffiti are the same: %s", newRoot.String())
+		}
 		b.Body.Graffiti = newRoot
 	default:
-		return errors.New("block is not a signed beacon block")
+		return fmt.Errorf("block has incorrect type: %T", block)
 	}
 	return nil
 }

@@ -107,6 +107,7 @@ func TestBlockCopying(t *testing.T) {
 	}
 
 	expectedBlockContentsRoot := geth_common.HexToHash("0x63ab3be9cfed1fe67d61fc030edd985c838f865d524bdeb2faf340e03d861dd9")
+	expectedBlockRoot := geth_common.HexToHash("0x37977b8edac80973deb38f3888bff9483b45b057c188ec041273cfe4485e2695")
 
 	blockContentsCopy, err := slot_actions.CopyBlockContents(blockContents)
 	if err != nil {
@@ -115,20 +116,40 @@ func TestBlockCopying(t *testing.T) {
 
 	blockContentsCopyRoot := blockContentsCopy.HashTreeRoot(configs.Mainnet, tree.GetHashFn())
 	if !bytes.Equal(blockContentsCopyRoot[:], expectedBlockContentsRoot[:]) {
-		t.Fatalf("wrong block blob response root: %s, expected %s", blockContentsCopyRoot.String(), expectedBlockContentsRoot.String())
+		t.Fatalf("wrong block contents root: %s, expected %s", blockContentsCopyRoot.String(), expectedBlockContentsRoot.String())
+	}
+
+	blockCopyRoot := blockContentsCopy.Block.HashTreeRoot(configs.Mainnet, tree.GetHashFn())
+	if !bytes.Equal(blockCopyRoot[:], expectedBlockRoot[:]) {
+		t.Fatalf("wrong block root: %s, expected %s", blockCopyRoot.String(), expectedBlockRoot.String())
 	}
 
 	// Modify the copy and verify that the original container dit not change
-	blockContentsCopy.Block.Body.Graffiti = common.Root{}
+	graffitiModifier := &slot_actions.GraffitiModifier{
+		NewGraffiti: "Modified",
+		Append:      true,
+	}
+	graffitiModifier.ModifyBlock(spec, blockContentsCopy.Block)
 
 	blockContentsRoot := blockContents.HashTreeRoot(configs.Mainnet, tree.GetHashFn())
+	blockRoot := blockContents.Block.HashTreeRoot(configs.Mainnet, tree.GetHashFn())
+
+	blockContentsCopyRoot = blockContentsCopy.HashTreeRoot(configs.Mainnet, tree.GetHashFn())
+	blockCopyRoot = blockContentsCopy.Block.HashTreeRoot(configs.Mainnet, tree.GetHashFn())
+
+	// Check that the original block contents did not change
 	if !bytes.Equal(blockContentsRoot[:], expectedBlockContentsRoot[:]) {
 		t.Fatalf("wrong block blob response root: %s, expected %s", blockContentsRoot.String(), expectedBlockContentsRoot.String())
 	}
+	if !bytes.Equal(blockRoot[:], expectedBlockRoot[:]) {
+		t.Fatalf("wrong block root: %s, expected %s", blockCopyRoot.String(), expectedBlockRoot.String())
+	}
 
-	blockContentsCopyRoot = blockContentsCopy.HashTreeRoot(configs.Mainnet, tree.GetHashFn())
 	if bytes.Equal(blockContentsCopyRoot[:], blockContentsRoot[:]) {
 		t.Fatalf("wrong block blob response root: %s, expected change from %s", blockContentsCopyRoot.String(), blockContentsRoot.String())
+	}
+	if bytes.Equal(blockCopyRoot[:], blockRoot[:]) {
+		t.Fatalf("wrong block root: %s, expected change from %s", blockCopyRoot.String(), blockRoot.String())
 	}
 
 	// Restore graffiti
