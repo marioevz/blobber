@@ -78,18 +78,14 @@ func TestSlotActionsJsonParsing(t *testing.T) {
 	}
 
 	jsonString = `{
-		"name": "equivocating_block",
+		"name": "invalid_equivocating_block",
 		"correct_block_delay_milliseconds": 1000
 	}`
 	act, err = slot_actions.UnmarshallSlotAction([]byte(jsonString))
 	if err != nil {
 		t.Fatalf("UnmarshallSlotAction() error = %v", err)
 	}
-	if actCast, ok := act.(*slot_actions.EquivocatingBlock); !ok {
+	if _, ok := act.(*slot_actions.InvalidEquivocatingBlock); !ok {
 		t.Fatalf("UnmarshallSlotAction() wrong type = %t", act)
-	} else {
-		if actCast.CorrectBlockDelayMilliseconds != 1000 {
-			t.Fatalf("UnmarshallSlotAction() correct_block_delay_milliseconds = %d", actCast.CorrectBlockDelayMilliseconds)
-		}
 	}
 }

@@ -3,7 +3,6 @@ package slot_actions
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/lithammer/dedent"
 	"github.com/marioevz/blobber/common"
@@ -54,8 +53,8 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 		action = &EquivocatingBlockAndBlobs{}
 	case "equivocating_block_header_in_blobs":
 		action = &EquivocatingBlockHeaderInBlobs{}
-	case "equivocating_block":
-		action = &EquivocatingBlock{}
+	case "invalid_equivocating_block":
+		action = &InvalidEquivocatingBlock{}
 	/*
 		case "extra_blobs":
 			action = &ExtraBlobs{}
@@ -349,37 +348,34 @@ func (s EquivocatingBlockHeaderInBlobs) Execute(
 	return true, nil
 }
 
-type EquivocatingBlock struct {
+type InvalidEquivocatingBlock struct {
 	Default
-	CorrectBlockDelayMilliseconds int `json:"correct_block_delay_milliseconds"`
 }
 
-func (s EquivocatingBlock) Name() string {
-	return "Equivocating Block"
+func (s InvalidEquivocatingBlock) Name() string {
+	return "Invalid Equivocating Block"
 }
 
-func (s EquivocatingBlock) Description() string {
-	desc := fmt.Sprintf(dedent.Dedent(`
+func (s InvalidEquivocatingBlock) Description() string {
+	desc := dedent.Dedent(`
 	- Create an equivocating block by modifying the graffiti
 	- Sign both blocks
 	- Generate the sidecars out of the correct block only
 	- Broadcast the blob sidecars
-	- Broadcast the equivocating signed block
-	- Insert a delay of %d milliseconds
-	- Broadcast the correct signed block`), s.CorrectBlockDelayMilliseconds)
+	- Broadcast the equivocating signed block and the correct signed block to different peers`)
 	return desc
 }
 
-func (s EquivocatingBlock) SlotMiss(spec *beacon_common.Spec) bool {
-	// Consider a slot miss only if the delay is more than half a slot
-	return s.CorrectBlockDelayMilliseconds >= int(spec.SECONDS_PER_SLOT*1000)/2
-}
-
-func (s EquivocatingBlock) Fields() map[string]interface{} {
+func (s InvalidEquivocatingBlock) Fields() map[string]interface{} {
 	return map[string]interface{}{}
 }
 
-func (s EquivocatingBlock) Execute(
+func (s InvalidEquivocatingBlock) GetTestPeerCount() int {
+	// We are going to send two conflicting blocks through two different test p2p connections
+	return 2
+}
+
+func (s InvalidEquivocatingBlock) Execute(
 	spec *beacon_common.Spec,
 	testPeers p2p.TestPeers,
 	beaconBlockContents *deneb.BlockContents,
@@ -388,6 +384,9 @@ func (s EquivocatingBlock) Execute(
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
+	if len(testPeers) != 2 {
+		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
+	}
 	// Sign the blocks (original and equivocating) and generate the sidecars
 	signedBlockBlobsBundles, err := CreateSignEquivocatingBlock(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
@@ -409,15 +408,7 @@ func (s EquivocatingBlock) Execute(
 		Peers:      testPeers,
 		BlobsFirst: true,
 	}
-	if err := broadcaster.Broadcast(signedBlockSidecarBundle); err != nil {
-		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
-	}
-
-	// Insert a delay before gossiping the correct block
-	time.Sleep(time.Duration(s.CorrectBlockDelayMilliseconds) * time.Millisecond)
-
-	// Broadcast the correct block
-	if err := testPeers.BroadcastSignedBeaconBlock(spec, correctBlockBundle.SignedBlock); err != nil {
+	if err := broadcaster.Broadcast(signedBlockSidecarBundle, correctBlockBundle); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
