@@ -55,6 +55,7 @@ docker run -it ethpandaops/blobber:latest --help
 
 ## Configuration
 
+### Beacon Node Configuration
 The blobber requires at least one consensus client in Beacon Node + Validator Client configuration, and the `--cl` flag must be provided to point to the Beacon Node REST API endpoint:
 
 ```bash
@@ -65,7 +66,15 @@ The Beacon Node endpoint will be used to relay all Validator Client requests and
 
 The validator client must be then configured to connect to the blobber instead of the Beacon Node, starting at port 20,000 (by default) and increasing by 1 for each Beacon Node configured using the `--cl` flag.
 
-## Proposal Actions
+### Validator Keys
+
+In order to produce block signatures, correct and equivocating, the blobber needs the validator keys of the validators that will be used to perform the actions, and these, ideally, should be the whole set or a subset of the keys that the configured validator client has.
+
+Either of the following parameter flags can be used to configure these keys:
+- `--validator-key-file`: Path to a single text file containing the validator secret keys in hexadecimal format, one key per line.
+- `--validator-key-folder`: Path to a folder containing the "keys" and "secrets" subfolders with the validator secret keys.
+
+### Proposal Actions
 
 The blobber can be configured to perform actions on a block proposal, such as delaying blobs broadcasting, create equivocating blob sidecars, among other things.
 
