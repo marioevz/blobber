@@ -51,8 +51,8 @@ func UnmarshallProposalAction(data []byte) (ProposalAction, error) {
 		action = &BlobGossipDelay{}
 	case "equivocating_blob_sidecars":
 		action = &EquivocatingBlobSidecars{}
-	case "equivocating_block_and_blobs":
-		action = &EquivocatingBlockAndBlobs{}
+	case "invalid_equivocating_block_and_blobs":
+		action = &InvalidEquivocatingBlockAndBlobs{}
 	case "equivocating_block_header_in_blobs":
 		action = &EquivocatingBlockHeaderInBlobs{}
 	case "invalid_equivocating_block":
@@ -280,7 +280,7 @@ func (s EquivocatingBlobSidecars) Execute(
 	return true, nil
 }
 
-type EquivocatingBlockAndBlobs struct {
+type InvalidEquivocatingBlockAndBlobs struct {
 	Default
 	BroadcastBlobsFirst bool `json:"broadcast_blobs_first"`
 	// TODO: ModifyBlobs         bool `json:"modify_blobs"`
@@ -288,11 +288,11 @@ type EquivocatingBlockAndBlobs struct {
 	AlternateRecipients bool `json:"alternate_recipients"`
 }
 
-func (s EquivocatingBlockAndBlobs) Name() string {
+func (s InvalidEquivocatingBlockAndBlobs) Name() string {
 	return "Equivocating Block and Blobs"
 }
 
-func (s EquivocatingBlockAndBlobs) Description() string {
+func (s InvalidEquivocatingBlockAndBlobs) Description() string {
 	desc := dedent.Dedent(`
 	- Create an equivocating block by modifying the graffiti
 	- Sign both blocks
@@ -313,16 +313,16 @@ func (s EquivocatingBlockAndBlobs) Description() string {
 	return desc
 }
 
-func (s EquivocatingBlockAndBlobs) Fields() map[string]interface{} {
+func (s InvalidEquivocatingBlockAndBlobs) Fields() map[string]interface{} {
 	return map[string]interface{}{}
 }
 
-func (s EquivocatingBlockAndBlobs) GetTestPeerCount() int {
+func (s InvalidEquivocatingBlockAndBlobs) GetTestPeerCount() int {
 	// We are going to send two conflicting blocks and sets of blobs through two different test p2p connections
 	return 2
 }
 
-func (s EquivocatingBlockAndBlobs) Execute(
+func (s InvalidEquivocatingBlockAndBlobs) Execute(
 	spec *beacon_common.Spec,
 	testPeers p2p.TestPeers,
 	beaconBlockContents *deneb.BlockContents,
@@ -368,7 +368,7 @@ func (s EquivocatingBlockHeaderInBlobs) Name() string {
 
 func (s EquivocatingBlockHeaderInBlobs) Description() string {
 	desc := dedent.Dedent(`
-	- Create an equivocating block by modifying the graffiti
+	- Create an invalid equivocating block by modifying the graffiti
 	- Sign both blocks
 	- Generate the sidecars out of the equivocating signed block only`)
 	if s.BroadcastBlobsFirst {
@@ -436,7 +436,7 @@ func (s InvalidEquivocatingBlock) Name() string {
 
 func (s InvalidEquivocatingBlock) Description() string {
 	desc := dedent.Dedent(`
-	- Create an equivocating block by modifying the graffiti
+	- Create an invalid equivocating block by modifying the graffiti
 	- Sign both blocks
 	- Generate the sidecars out of the correct block only
 	- Broadcast the blob sidecars

@@ -42,7 +42,7 @@ func TestProposalActionsJsonParsing(t *testing.T) {
 	}
 
 	jsonString = `{
-		"name": "equivocating_block_and_blobs",
+		"name": "invalid_equivocating_block_and_blobs",
 		"broadcast_blobs_first": true,
 		"alternate_recipients": true
 	}`
@@ -50,7 +50,7 @@ func TestProposalActionsJsonParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshallProposalAction() error = %v", err)
 	}
-	if actCast, ok := act.(*proposal_actions.EquivocatingBlockAndBlobs); !ok {
+	if actCast, ok := act.(*proposal_actions.InvalidEquivocatingBlockAndBlobs); !ok {
 		t.Fatalf("UnmarshallProposalAction() wrong type = %t", act)
 	} else {
 		if actCast.BroadcastBlobsFirst != true {
