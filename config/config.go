@@ -7,7 +7,7 @@ import (
 
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
-	"github.com/marioevz/blobber/slot_actions"
+	"github.com/marioevz/blobber/proposal_actions"
 	beacon "github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/ztyp/tree"
 	"github.com/sirupsen/logrus"
@@ -32,8 +32,8 @@ type Config struct {
 
 	ValidatorLoadTimeoutSeconds int
 
-	SlotAction          slot_actions.SlotAction
-	SlotActionFrequency uint64
+	ProposalAction          proposal_actions.ProposalAction
+	ProposalActionFrequency uint64
 }
 
 func (cfg *Config) Apply(opts ...Option) error {
@@ -258,27 +258,27 @@ func WithValidatorKeysListFromFolder(path string) Option {
 	}
 }
 
-func WithSlotAction(action slot_actions.SlotAction) Option {
+func WithProposalAction(action proposal_actions.ProposalAction) Option {
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()
 			defer cfg.Unlock()
-			cfg.SlotAction = action
+			cfg.ProposalAction = action
 			return nil
 		},
-		description: fmt.Sprintf("WithSlotAction(%s)", action),
+		description: fmt.Sprintf("WithProposalAction(%s)", action),
 	}
 }
 
-func WithSlotActionFrequency(freq uint64) Option {
+func WithProposalActionFrequency(freq uint64) Option {
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()
 			defer cfg.Unlock()
-			cfg.SlotActionFrequency = freq
+			cfg.ProposalActionFrequency = freq
 			return nil
 		},
-		description: fmt.Sprintf("WithSlotActionFrequency(%d)", freq),
+		description: fmt.Sprintf("WithProposalActionFrequency(%d)", freq),
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 	"github.com/marioevz/blobber/config"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
-	"github.com/marioevz/blobber/slot_actions"
+	"github.com/marioevz/blobber/proposal_actions"
 	"github.com/marioevz/blobber/validator_proxy"
 	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
 	"github.com/pkg/errors"
@@ -130,12 +130,12 @@ func (b *Blobber) Address() string {
 	)
 }
 
-// Return a list of blobs that each slot action has classified as must-be-included
+// Return a list of blobs that each proposal action has classified as must-be-included
 func (b *Blobber) IncludeBlobRecord() *common.BlobRecord {
 	return b.includeBlobRecord
 }
 
-// Return a list of blobs that each slot action has classified as must-be-rejected
+// Return a list of blobs that each proposal action has classified as must-be-rejected
 func (b *Blobber) RejectBlobRecord() *common.BlobRecord {
 	return b.rejectBlobRecord
 }
@@ -264,23 +264,23 @@ func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 	return nil
 }
 
-func (b *Blobber) getSlotAction(slot uint64) (slot_actions.SlotAction, error) {
-	var slotAction slot_actions.SlotAction
+func (b *Blobber) getProposalAction(slot uint64) (proposal_actions.ProposalAction, error) {
+	var proposalAction proposal_actions.ProposalAction
 
 	b.Lock()
 	defer b.Unlock()
 
-	if b.SlotAction != nil {
-		if b.SlotActionFrequency <= 1 || slot%b.SlotActionFrequency == 0 {
-			slotAction = b.SlotAction
+	if b.ProposalAction != nil {
+		if b.ProposalActionFrequency <= 1 || slot%b.ProposalActionFrequency == 0 {
+			proposalAction = b.ProposalAction
 		}
 	}
 
-	if slotAction == nil {
-		slotAction = slot_actions.Default{}
+	if proposalAction == nil {
+		proposalAction = proposal_actions.Default{}
 	}
 
-	return slotAction, nil
+	return proposalAction, nil
 }
 
 func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
@@ -291,21 +291,21 @@ func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.B
 	)
 }
 
-func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blResponse *deneb.BlockContents, validatorKey *keys.ValidatorKey) (bool, error) {
-	slotAction, err := b.getSlotAction(uint64(blResponse.Block.Slot))
+func (b *Blobber) executeProposalActions(trigger_cl *beacon_client.BeaconClient, blResponse *deneb.BlockContents, validatorKey *keys.ValidatorKey) (bool, error) {
+	proposalAction, err := b.getProposalAction(uint64(blResponse.Block.Slot))
 	if err != nil {
-		return false, errors.Wrap(err, "failed to get slot action")
+		return false, errors.Wrap(err, "failed to get proposal action")
 	}
-	if slotAction == nil {
-		panic("slot action is nil")
-	}
-
-	slotActionFields := logrus.Fields(slotAction.Fields())
-	if len(slotActionFields) > 0 {
-		logrus.WithFields(slotActionFields).Info("Action configuration")
+	if proposalAction == nil {
+		panic("proposal action is nil")
 	}
 
-	testPeerCount := slotAction.GetTestPeerCount()
+	proposalActionFields := logrus.Fields(proposalAction.Fields())
+	if len(proposalActionFields) > 0 {
+		logrus.WithFields(proposalActionFields).Info("Action configuration")
+	}
+
+	testPeerCount := proposalAction.GetTestPeerCount()
 
 	// Peer with the beacon nodes and broadcast the block and blobs
 	testPeers, err := b.GetTestPeer(b.ctx, testPeerCount)
@@ -336,11 +336,11 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		"block_root":        blockRoot.String(),
 		"parent_block_root": blResponse.Block.ParentRoot.String(),
 		"blob_count":        len(blResponse.Blobs),
-		"action_name":       slotAction.Name(),
+		"action_name":       proposalAction.Name(),
 	}).Info("Preparing action for block and blobs")
 
 	calcBeaconBlockDomain := b.calcBeaconBlockDomain(blResponse.Block.Slot)
-	executed, err := slotAction.Execute(
+	executed, err := proposalAction.Execute(
 		b.Spec,
 		testPeers,
 		blResponse,
@@ -354,7 +354,7 @@ func (b *Blobber) executeSlotActions(trigger_cl *beacon_client.BeaconClient, blR
 		b.builtBlocksMap.BlockRoots[blResponse.Block.Slot] = blockRoot
 		b.builtBlocksMap.Unlock()
 	}
-	return executed, errors.Wrap(err, "failed to execute slot action")
+	return executed, errors.Wrap(err, "failed to execute proposal action")
 }
 
 func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id int, version int) validator_proxy.ResponseCallback {
@@ -398,16 +398,16 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 			return false, errors.Wrap(err, "failed to update chain status")
 		}
 
-		// Execute the slot actions
+		// Execute the proposal actions
 		if validatorKey == nil {
-			logrus.Warn("No validator key found, skipping slot actions")
-			return false, errors.Wrap(err, "no validator key found, skipping slot actions")
+			logrus.Warn("No validator key found, skipping proposal actions")
+			return false, errors.Wrap(err, "no validator key found, skipping proposal actions")
 		}
-		override, err := b.executeSlotActions(cl, blockBlobResponse, validatorKey)
+		override, err := b.executeProposalActions(cl, blockBlobResponse, validatorKey)
 		if err != nil {
-			logrus.WithError(err).Error("Failed to execute slot actions")
+			logrus.WithError(err).Error("Failed to execute proposal actions")
 		}
-		return override, errors.Wrap(err, "failed to execute slot actions")
+		return override, errors.Wrap(err, "failed to execute proposal actions")
 	}
 }
 

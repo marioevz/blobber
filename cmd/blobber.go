@@ -14,7 +14,7 @@ import (
 
 	"github.com/marioevz/blobber"
 	"github.com/marioevz/blobber/config"
-	"github.com/marioevz/blobber/slot_actions"
+	"github.com/marioevz/blobber/proposal_actions"
 	"github.com/marioevz/eth-clients/clients"
 	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
 	"github.com/sirupsen/logrus"
@@ -58,8 +58,8 @@ func main() {
 		logLevel                          string
 		validatorKeyFilePath              string
 		validatorKeyFolderPath            string
-		slotActionJson                    string
-		slotActionFrequency               int
+		proposalActionJson                string
+		proposalActionFrequency           int
 		beaconPortStart                   int
 		validatorProxyPortStart           int
 		maxDevP2PSessionReuses            int
@@ -126,16 +126,16 @@ func main() {
 		"Port number to start validator proxy listening ports from. For each beacon node added, there will be one extra port used.",
 	)
 	flag.StringVar(
-		&slotActionJson,
-		"slot-action",
+		&proposalActionJson,
+		"proposal-action",
 		"",
-		"Description of the slot action to execute in JSON formatted string. See slot_actions.go for examples.",
+		"Description of the proposal action to execute in JSON formatted string. See proposal_actions.go for examples.",
 	)
 	flag.IntVar(
-		&slotActionFrequency,
-		"slot-action-frequency",
+		&proposalActionFrequency,
+		"proposal-action-frequency",
 		1,
-		"Frequency of slot actions in slots. 1 means execute every slot, 2 means execute every other slot, etc.",
+		"Frequency of proposal actions in proposals. 1 means execute every proposal, 2 means execute every other proposal, etc.",
 	)
 	flag.IntVar(
 		&maxDevP2PSessionReuses,
@@ -249,7 +249,7 @@ func main() {
 		config.WithGenesisValidatorsRoot(*beaconClients[0].BeaconClient.Config.GenesisValidatorsRoot),
 		config.WithBeaconPortStart(beaconPortStart),
 		config.WithProxiesPortStart(validatorProxyPortStart),
-		config.WithSlotActionFrequency(uint64(slotActionFrequency)),
+		config.WithProposalActionFrequency(uint64(proposalActionFrequency)),
 		config.WithMaxDevP2PSessionReuses(maxDevP2PSessionReuses),
 		config.WithLogLevel(logLevel),
 	}
@@ -264,12 +264,12 @@ func main() {
 		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFolder(validatorKeyFolderPath))
 	}
 
-	if slotActionJson != "" {
-		slotAction, err := slot_actions.UnmarshallSlotAction([]byte(slotActionJson))
+	if proposalActionJson != "" {
+		proposalAction, err := proposal_actions.UnmarshallProposalAction([]byte(proposalActionJson))
 		if err != nil {
-			fatalf("error parsing slot action: %v\n", err)
+			fatalf("error parsing proposal action: %v\n", err)
 		}
-		blobberOpts = append(blobberOpts, config.WithSlotAction(slotAction))
+		blobberOpts = append(blobberOpts, config.WithProposalAction(proposalAction))
 	}
 
 	if stateValidatorFetchTimeoutSeconds > 0 {

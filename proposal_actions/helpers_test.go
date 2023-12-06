@@ -1,4 +1,4 @@
-package slot_actions_test
+package proposal_actions_test
 
 import (
 	"bytes"
@@ -8,7 +8,7 @@ import (
 	geth_common "github.com/ethereum/go-ethereum/common"
 	"github.com/marioevz/blobber"
 	"github.com/marioevz/blobber/keys"
-	"github.com/marioevz/blobber/slot_actions"
+	"github.com/marioevz/blobber/proposal_actions"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/zrnt/eth2/beacon/deneb"
 	"github.com/protolambda/zrnt/eth2/configs"
@@ -56,7 +56,7 @@ func TestBlockSigning(t *testing.T) {
 	}
 
 	// Test signing the block contents
-	signedBlockContents, err := slot_actions.SignBlockContents(spec, blockContents, beaconBlockDomain, validatorKey)
+	signedBlockContents, err := proposal_actions.SignBlockContents(spec, blockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestBlockSigning(t *testing.T) {
 	}
 
 	// Check that the signature is valid
-	if valid, err := slot_actions.VerifySignature(beaconBlockDomain, signedBlockRoot, validatorKey.ValidatorPubkey, signedBlockContents.SignedBlock.Signature); err != nil {
+	if valid, err := proposal_actions.VerifySignature(beaconBlockDomain, signedBlockRoot, validatorKey.ValidatorPubkey, signedBlockContents.SignedBlock.Signature); err != nil {
 		t.Fatal(err)
 	} else if !valid {
 		t.Fatal("signature is invalid")
@@ -109,7 +109,7 @@ func TestBlockCopying(t *testing.T) {
 	expectedBlockContentsRoot := geth_common.HexToHash("0x63ab3be9cfed1fe67d61fc030edd985c838f865d524bdeb2faf340e03d861dd9")
 	expectedBlockRoot := geth_common.HexToHash("0x37977b8edac80973deb38f3888bff9483b45b057c188ec041273cfe4485e2695")
 
-	blockContentsCopy, err := slot_actions.CopyBlockContents(blockContents)
+	blockContentsCopy, err := proposal_actions.CopyBlockContents(blockContents)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestBlockCopying(t *testing.T) {
 	}
 
 	// Modify the copy and verify that the original container dit not change
-	graffitiModifier := &slot_actions.GraffitiModifier{
+	graffitiModifier := &proposal_actions.GraffitiModifier{
 		NewGraffiti: "Modified",
 		Append:      true,
 	}
@@ -169,11 +169,11 @@ func TestBlockCopying(t *testing.T) {
 }
 
 func TestRootTextConverters(t *testing.T) {
-	r, err := slot_actions.TextToRoot("test")
+	r, err := proposal_actions.TextToRoot("test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	text, err := slot_actions.RootToText(r)
+	text, err := proposal_actions.RootToText(r)
 	if err != nil {
 		t.Fatal(err)
 	}

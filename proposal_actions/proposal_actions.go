@@ -1,4 +1,4 @@
-package slot_actions
+package proposal_actions
 
 import (
 	"encoding/json"
@@ -15,7 +15,7 @@ import (
 
 const MAX_BLOBS_PER_BLOCK = 6
 
-type SlotAction interface {
+type ProposalAction interface {
 	Name() string
 	Description() string
 	SlotMiss(spec *beacon_common.Spec) bool
@@ -32,7 +32,7 @@ type SlotAction interface {
 	) (bool, error)
 }
 
-func UnmarshallSlotAction(data []byte) (SlotAction, error) {
+func UnmarshallProposalAction(data []byte) (ProposalAction, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
@@ -42,17 +42,17 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 	}
 	var actionNameObj actionName
 	if err := json.Unmarshal(data, &actionNameObj); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshall slot action name")
+		return nil, errors.Wrap(err, "failed to unmarshall proposal action name")
 	}
 
-	var action SlotAction
+	var action ProposalAction
 	switch actionNameObj.Name {
 	case "blob_gossip_delay":
 		action = &BlobGossipDelay{}
 	case "equivocating_blob_sidecars":
 		action = &EquivocatingBlobSidecars{}
-	case "equivocating_block_and_blobs":
-		action = &EquivocatingBlockAndBlobs{}
+	case "invalid_equivocating_block_and_blobs":
+		action = &InvalidEquivocatingBlockAndBlobs{}
 	case "equivocating_block_header_in_blobs":
 		action = &EquivocatingBlockHeaderInBlobs{}
 	case "invalid_equivocating_block":
@@ -70,7 +70,7 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 	}
 
 	if err := json.Unmarshal(data, &action); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshall slot action")
+		return nil, errors.Wrap(err, "failed to unmarshall proposal action")
 	}
 	return action, nil
 }
@@ -280,7 +280,7 @@ func (s EquivocatingBlobSidecars) Execute(
 	return true, nil
 }
 
-type EquivocatingBlockAndBlobs struct {
+type InvalidEquivocatingBlockAndBlobs struct {
 	Default
 	BroadcastBlobsFirst bool `json:"broadcast_blobs_first"`
 	// TODO: ModifyBlobs         bool `json:"modify_blobs"`
@@ -288,11 +288,11 @@ type EquivocatingBlockAndBlobs struct {
 	AlternateRecipients bool `json:"alternate_recipients"`
 }
 
-func (s EquivocatingBlockAndBlobs) Name() string {
+func (s InvalidEquivocatingBlockAndBlobs) Name() string {
 	return "Equivocating Block and Blobs"
 }
 
-func (s EquivocatingBlockAndBlobs) Description() string {
+func (s InvalidEquivocatingBlockAndBlobs) Description() string {
 	desc := dedent.Dedent(`
 	- Create an equivocating block by modifying the graffiti
 	- Sign both blocks
@@ -313,16 +313,16 @@ func (s EquivocatingBlockAndBlobs) Description() string {
 	return desc
 }
 
-func (s EquivocatingBlockAndBlobs) Fields() map[string]interface{} {
+func (s InvalidEquivocatingBlockAndBlobs) Fields() map[string]interface{} {
 	return map[string]interface{}{}
 }
 
-func (s EquivocatingBlockAndBlobs) GetTestPeerCount() int {
+func (s InvalidEquivocatingBlockAndBlobs) GetTestPeerCount() int {
 	// We are going to send two conflicting blocks and sets of blobs through two different test p2p connections
 	return 2
 }
 
-func (s EquivocatingBlockAndBlobs) Execute(
+func (s InvalidEquivocatingBlockAndBlobs) Execute(
 	spec *beacon_common.Spec,
 	testPeers p2p.TestPeers,
 	beaconBlockContents *deneb.BlockContents,
@@ -368,7 +368,7 @@ func (s EquivocatingBlockHeaderInBlobs) Name() string {
 
 func (s EquivocatingBlockHeaderInBlobs) Description() string {
 	desc := dedent.Dedent(`
-	- Create an equivocating block by modifying the graffiti
+	- Create an invalid equivocating block by modifying the graffiti
 	- Sign both blocks
 	- Generate the sidecars out of the equivocating signed block only`)
 	if s.BroadcastBlobsFirst {
@@ -436,7 +436,7 @@ func (s InvalidEquivocatingBlock) Name() string {
 
 func (s InvalidEquivocatingBlock) Description() string {
 	desc := dedent.Dedent(`
-	- Create an equivocating block by modifying the graffiti
+	- Create an invalid equivocating block by modifying the graffiti
 	- Sign both blocks
 	- Generate the sidecars out of the correct block only
 	- Broadcast the blob sidecars
