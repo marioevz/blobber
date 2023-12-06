@@ -1,4 +1,4 @@
-package slot_actions
+package proposal_actions
 
 import (
 	"encoding/json"
@@ -15,7 +15,7 @@ import (
 
 const MAX_BLOBS_PER_BLOCK = 6
 
-type SlotAction interface {
+type ProposalAction interface {
 	Name() string
 	Description() string
 	SlotMiss(spec *beacon_common.Spec) bool
@@ -32,7 +32,7 @@ type SlotAction interface {
 	) (bool, error)
 }
 
-func UnmarshallSlotAction(data []byte) (SlotAction, error) {
+func UnmarshallProposalAction(data []byte) (ProposalAction, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
@@ -42,10 +42,10 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 	}
 	var actionNameObj actionName
 	if err := json.Unmarshal(data, &actionNameObj); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshall slot action name")
+		return nil, errors.Wrap(err, "failed to unmarshall proposal action name")
 	}
 
-	var action SlotAction
+	var action ProposalAction
 	switch actionNameObj.Name {
 	case "blob_gossip_delay":
 		action = &BlobGossipDelay{}
@@ -70,7 +70,7 @@ func UnmarshallSlotAction(data []byte) (SlotAction, error) {
 	}
 
 	if err := json.Unmarshal(data, &action); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshall slot action")
+		return nil, errors.Wrap(err, "failed to unmarshall proposal action")
 	}
 	return action, nil
 }

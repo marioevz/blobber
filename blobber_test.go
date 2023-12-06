@@ -12,7 +12,7 @@ import (
 	"github.com/protolambda/ztyp/tree"
 )
 
-//go:embed slot_actions/response_deneb.json
+//go:embed proposal_actions/response_deneb.json
 var responseDeneb string
 
 func TestResponseParse(t *testing.T) {

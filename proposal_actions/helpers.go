@@ -1,4 +1,4 @@
-package slot_actions
+package proposal_actions
 
 import (
 	"bytes"
