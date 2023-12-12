@@ -63,7 +63,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v4
         with:
-          images: ethpandaops/ethereum-genesis-generator
+          images: ethpandaops/blobber
           flavor: latest=true
           tags: |
             type=ref,event=branch
