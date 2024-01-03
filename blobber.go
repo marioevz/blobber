@@ -6,14 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/marioevz/blobber/api"
 	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/config"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
+	"github.com/marioevz/blobber/proposal_actions"
 	"github.com/marioevz/blobber/validator_proxy"
 	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
 	"github.com/pkg/errors"
@@ -53,6 +56,7 @@ type Blobber struct {
 
 	// Other
 	forkDecoder *beacon.ForkDecoder
+	blobberApi  *api.BlobberApi
 
 	// Records
 	builtBlocksMap    *BuiltBlocksMap
@@ -118,6 +122,18 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 	// Create the fork decoder
 	b.forkDecoder = beacon.NewForkDecoder(b.Spec, b.GenesisValidatorsRoot)
 
+	// Start blobber api
+	if b.ApiPort != 0 {
+		blobberApi, err := api.NewBlobberApi(ctx, b.Host, b.ApiPort, map[string]api.ApiHandlerCallback{
+			"/ProposalAction":          b.handleProposalActionApi,
+			"/ProposalActionFrequency": b.handleProposalActionFrequencyApi,
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to start blobber api")
+		}
+		b.blobberApi = blobberApi
+	}
+
 	return b, nil
 }
 
@@ -142,6 +158,9 @@ func (b *Blobber) RejectBlobRecord() *common.BlobRecord {
 func (b *Blobber) Close() {
 	for _, proxy := range b.proxies {
 		proxy.Cancel()
+	}
+	if b.blobberApi != nil {
+		b.blobberApi.Cancel()
 	}
 }
 
@@ -452,4 +471,27 @@ func ParseResponse(response []byte) (string, *deneb.BlockContents, error) {
 	}
 
 	return *blockDataStruct.Version, data, nil
+}
+
+func (b *Blobber) handleProposalActionApi(request *http.Request, body []byte) (interface{}, error) {
+	if request.Method == http.MethodPost {
+		proposalAction, err := proposal_actions.UnmarshallProposalAction(body)
+		if err != nil {
+			return nil, err
+		}
+		b.ProposalAction = proposalAction
+	}
+	return b.ProposalAction, nil
+}
+
+func (b *Blobber) handleProposalActionFrequencyApi(request *http.Request, body []byte) (interface{}, error) {
+	if request.Method == http.MethodPost {
+		value, err := strconv.ParseUint(string(body), 10, 64)
+		if err != nil {
+			return nil, err
+		}
+
+		b.ProposalActionFrequency = value
+	}
+	return b.ProposalActionFrequency, nil
 }
