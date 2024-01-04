@@ -65,6 +65,7 @@ func main() {
 		maxDevP2PSessionReuses            int
 		blobberID                         uint64
 		unsafeMode                        bool
+		apiPort                           int
 	)
 
 	flag.Var(
@@ -161,6 +162,12 @@ func main() {
 		false,
 		"Enable unsafe mode, only use this if you know what you're doing and never attempt to run this tool on mainnet.",
 	)
+	flag.IntVar(
+		&apiPort,
+		"api-port",
+		0,
+		"Port number for the blobber api. 0 means disable blobber api.",
+	)
 
 	err := flag.CommandLine.Parse(os.Args[1:])
 	if err != nil {
@@ -252,6 +259,7 @@ func main() {
 		config.WithProposalActionFrequency(uint64(proposalActionFrequency)),
 		config.WithMaxDevP2PSessionReuses(maxDevP2PSessionReuses),
 		config.WithLogLevel(logLevel),
+		config.WithApiPort(apiPort),
 	}
 
 	if validatorKeyFilePath != "" && validatorKeyFolderPath != "" {
