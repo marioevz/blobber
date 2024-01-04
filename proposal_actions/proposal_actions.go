@@ -1,6 +1,7 @@
 package proposal_actions
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -36,6 +37,13 @@ type ProposalActionBase interface {
 	) (bool, error)
 }
 
+type ProposalActionResult struct {
+	Success    bool   `json:"success"`
+	Slot       uint64 `json:"slot"`
+	Root       []byte `json:"root"`
+	ActionName string `json:"action_name"`
+}
+
 type ProposalActionConfiguration interface {
 	Frequency() uint64
 	SetFrequency(uint64)
@@ -43,6 +51,8 @@ type ProposalActionConfiguration interface {
 	SetMaxExecutionTimes(uint64)
 	TimesExecuted() uint64
 	IncrementTimesExecuted()
+	SetNextResult(*ProposalActionResult)
+	WaitForNextResult(ctx context.Context) (*ProposalActionResult, error)
 }
 
 type ProposalAction interface {
@@ -51,9 +61,10 @@ type ProposalAction interface {
 }
 
 type ProposalActionConfig struct {
-	Freq         uint64 `json:"frequency"`
-	MaxExecTimes uint64 `json:"max_execution_times"`
-	Times        uint64 `json:"-"`
+	Freq         uint64                     `json:"frequency"`
+	MaxExecTimes uint64                     `json:"max_execution_times"`
+	Times        uint64                     `json:"-"`
+	ResultChan   chan *ProposalActionResult `json:"-"`
 }
 
 func (c *ProposalActionConfig) Frequency() uint64 {
@@ -78,6 +89,25 @@ func (c *ProposalActionConfig) TimesExecuted() uint64 {
 
 func (c *ProposalActionConfig) IncrementTimesExecuted() {
 	c.Times++
+}
+
+func (c *ProposalActionConfig) SetNextResult(result *ProposalActionResult) {
+	if c.ResultChan != nil {
+		c.ResultChan <- result
+	}
+}
+
+func (c *ProposalActionConfig) WaitForNextResult(ctx context.Context) (*ProposalActionResult, error) {
+	c.ResultChan = make(chan *ProposalActionResult, 1)
+	defer func() {
+		c.ResultChan = nil
+	}()
+	select {
+	case result := <-c.ResultChan:
+		return result, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 type ConfiguredAction struct {
