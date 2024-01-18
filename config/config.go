@@ -32,8 +32,7 @@ type Config struct {
 
 	ValidatorLoadTimeoutSeconds int
 
-	ProposalAction          proposal_actions.ProposalAction
-	ProposalActionFrequency uint64
+	ProposalAction proposal_actions.ProposalAction
 }
 
 func (cfg *Config) Apply(opts ...Option) error {
@@ -275,7 +274,10 @@ func WithProposalActionFrequency(freq uint64) Option {
 		apply: func(cfg *Config) error {
 			cfg.Lock()
 			defer cfg.Unlock()
-			cfg.ProposalActionFrequency = freq
+			if cfg.ProposalAction == nil {
+				return fmt.Errorf("cannot set ProposalActionFrequency without ProposalAction")
+			}
+			cfg.ProposalAction.SetFrequency(freq)
 			return nil
 		},
 		description: fmt.Sprintf("WithProposalActionFrequency(%d)", freq),
