@@ -1,4 +1,4 @@
-FROM golang:1.20.10-bullseye as builder
+FROM golang:1.21.7-bullseye as builder
 
 # Override the default value of GOOS when building the Docker image using the --build-arg flag
 ARG GOOS=linux
