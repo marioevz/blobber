@@ -80,17 +80,17 @@ func (c *ProposalActionConfig) IncrementTimesExecuted() {
 	c.Times++
 }
 
-func ConfigureProposalAction(proposalActionBase ProposalActionBase, config *ProposalActionConfig) ProposalAction {
-	type configuredAction struct {
-		ProposalActionBase
-		*ProposalActionConfig
-	}
+type ConfiguredAction struct {
+	ProposalActionBase
+	*ProposalActionConfig
+}
 
+func ConfigureProposalAction(proposalActionBase ProposalActionBase, config *ProposalActionConfig) ProposalAction {
 	if config == nil {
 		config = &ProposalActionConfig{}
 	}
 
-	configuredActionObj := configuredAction{
+	configuredActionObj := ConfiguredAction{
 		ProposalActionBase:   proposalActionBase,
 		ProposalActionConfig: config,
 	}
