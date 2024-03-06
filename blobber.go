@@ -14,7 +14,6 @@ import (
 	"github.com/marioevz/blobber/config"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
-	"github.com/marioevz/blobber/proposal_actions"
 	"github.com/marioevz/blobber/validator_proxy"
 	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
 	"github.com/pkg/errors"
@@ -264,25 +263,6 @@ func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 	return nil
 }
 
-func (b *Blobber) getProposalAction(slot uint64) (proposal_actions.ProposalAction, error) {
-	var proposalAction proposal_actions.ProposalAction
-
-	b.Lock()
-	defer b.Unlock()
-
-	if b.ProposalAction != nil {
-		if b.ProposalActionFrequency <= 1 || slot%b.ProposalActionFrequency == 0 {
-			proposalAction = b.ProposalAction
-		}
-	}
-
-	if proposalAction == nil {
-		proposalAction = proposal_actions.Default{}
-	}
-
-	return proposalAction, nil
-}
-
 func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
 	return beacon_common.ComputeDomain(
 		beacon_common.DOMAIN_BEACON_PROPOSER,
@@ -292,17 +272,50 @@ func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.B
 }
 
 func (b *Blobber) executeProposalActions(trigger_cl *beacon_client.BeaconClient, blResponse *deneb.BlockContents, validatorKey *keys.ValidatorKey) (bool, error) {
-	proposalAction, err := b.getProposalAction(uint64(blResponse.Block.Slot))
-	if err != nil {
-		return false, errors.Wrap(err, "failed to get proposal action")
-	}
+	b.Lock()
+	proposalAction := b.ProposalAction
+	b.Unlock()
+
 	if proposalAction == nil {
-		panic("proposal action is nil")
+		logrus.WithFields(logrus.Fields{
+			"slot": uint64(blResponse.Block.Slot),
+		}).Info("No proposal action configured")
+		return false, nil
 	}
 
+	// Check the frequency
+	if proposalAction.Frequency() > 1 && uint64(blResponse.Block.Slot)%proposalAction.Frequency() != 0 {
+		logrus.WithFields(logrus.Fields{
+			"slot":      uint64(blResponse.Block.Slot),
+			"frequency": proposalAction.Frequency(),
+		}).Info("Skipping proposal action due to configured frequency")
+		return false, nil
+	}
+
+	// Check the max execution times
+	if proposalAction.MaxExecutionTimes() > 0 && proposalAction.TimesExecuted() >= proposalAction.MaxExecutionTimes() {
+		logrus.WithFields(logrus.Fields{
+			"slot":             uint64(blResponse.Block.Slot),
+			"max_execution":    proposalAction.MaxExecutionTimes(),
+			"times_executed":   proposalAction.TimesExecuted(),
+			"action_frequency": proposalAction.Frequency(),
+		}).Info("Skipping proposal action due to max execution times")
+		return false, nil
+	}
+
+	// Log the proposal action
 	proposalActionFields := logrus.Fields(proposalAction.Fields())
 	if len(proposalActionFields) > 0 {
 		logrus.WithFields(proposalActionFields).Info("Action configuration")
+	}
+
+	// Check whether the proposal action should be executed
+	if canExec, reason := proposalAction.CanExecute(b.Spec, blResponse); !canExec {
+		logrus.WithFields(logrus.Fields{
+			"slot":   uint64(blResponse.Block.Slot),
+			"reason": reason,
+		}).Info("Skipping proposal action")
+		return false, nil
 	}
 
 	testPeerCount := proposalAction.GetTestPeerCount()
@@ -349,10 +362,11 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon_client.BeaconClient,
 		b.includeBlobRecord,
 		b.rejectBlobRecord,
 	)
-	if executed {
+	if executed && err == nil {
 		b.builtBlocksMap.Lock()
 		b.builtBlocksMap.BlockRoots[blResponse.Block.Slot] = blockRoot
 		b.builtBlocksMap.Unlock()
+		b.ProposalAction.IncrementTimesExecuted()
 	}
 	return executed, errors.Wrap(err, "failed to execute proposal action")
 }

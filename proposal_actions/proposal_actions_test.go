@@ -15,7 +15,8 @@ func TestProposalActionsJsonParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshallProposalAction() error = %v", err)
 	}
-	if actCast, ok := act.(*proposal_actions.Default); !ok {
+
+	if actCast, ok := act.(proposal_actions.ConfiguredAction).ProposalActionBase.(*proposal_actions.Default); !ok {
 		t.Fatalf("UnmarshallProposalAction() wrong type = %t", act)
 	} else {
 		if actCast.BroadcastBlobsFirst != true {
@@ -33,7 +34,7 @@ func TestProposalActionsJsonParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshallProposalAction() error = %v", err)
 	}
-	if actCast, ok := act.(*proposal_actions.BlobGossipDelay); !ok {
+	if actCast, ok := act.(proposal_actions.ConfiguredAction).ProposalActionBase.(*proposal_actions.BlobGossipDelay); !ok {
 		t.Fatalf("UnmarshallProposalAction() wrong type = %t", act)
 	} else {
 		if actCast.DelayMilliseconds != 1000 {
@@ -50,7 +51,7 @@ func TestProposalActionsJsonParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshallProposalAction() error = %v", err)
 	}
-	if actCast, ok := act.(*proposal_actions.InvalidEquivocatingBlockAndBlobs); !ok {
+	if actCast, ok := act.(proposal_actions.ConfiguredAction).ProposalActionBase.(*proposal_actions.InvalidEquivocatingBlockAndBlobs); !ok {
 		t.Fatalf("UnmarshallProposalAction() wrong type = %t", act)
 	} else {
 		if actCast.BroadcastBlobsFirst != true {
@@ -69,7 +70,7 @@ func TestProposalActionsJsonParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshallProposalAction() error = %v", err)
 	}
-	if actCast, ok := act.(*proposal_actions.EquivocatingBlockHeaderInBlobs); !ok {
+	if actCast, ok := act.(proposal_actions.ConfiguredAction).ProposalActionBase.(*proposal_actions.EquivocatingBlockHeaderInBlobs); !ok {
 		t.Fatalf("UnmarshallProposalAction() wrong type = %t", act)
 	} else {
 		if actCast.BroadcastBlobsFirst != true {
@@ -85,7 +86,7 @@ func TestProposalActionsJsonParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshallProposalAction() error = %v", err)
 	}
-	if _, ok := act.(*proposal_actions.InvalidEquivocatingBlock); !ok {
+	if _, ok := act.(proposal_actions.ConfiguredAction).ProposalActionBase.(*proposal_actions.InvalidEquivocatingBlock); !ok {
 		t.Fatalf("UnmarshallProposalAction() wrong type = %t", act)
 	}
 
@@ -97,7 +98,7 @@ func TestProposalActionsJsonParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshallProposalAction() error = %v", err)
 	}
-	if actCast, ok := act.(*proposal_actions.EquivocatingBlobSidecars); !ok {
+	if actCast, ok := act.(proposal_actions.ConfiguredAction).ProposalActionBase.(*proposal_actions.EquivocatingBlobSidecars); !ok {
 		t.Fatalf("UnmarshallProposalAction() wrong type = %t", act)
 	} else {
 		if actCast.BroadcastBlobsFirst != true {

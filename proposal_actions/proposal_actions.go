@@ -15,12 +15,16 @@ import (
 
 const MAX_BLOBS_PER_BLOCK = 6
 
-type ProposalAction interface {
+type ProposalActionBase interface {
 	Name() string
 	Description() string
 	SlotMiss(spec *beacon_common.Spec) bool
 	Fields() map[string]interface{}
 	GetTestPeerCount() int
+	CanExecute(
+		spec *beacon_common.Spec,
+		beaconBlockContents *deneb.BlockContents,
+	) (bool, string)
 	Execute(
 		spec *beacon_common.Spec,
 		testPeers p2p.TestPeers,
@@ -30,6 +34,68 @@ type ProposalAction interface {
 		includeBlobRecord *common.BlobRecord,
 		rejectBlobRecord *common.BlobRecord,
 	) (bool, error)
+}
+
+type ProposalActionConfiguration interface {
+	Frequency() uint64
+	SetFrequency(uint64)
+	MaxExecutionTimes() uint64
+	SetMaxExecutionTimes(uint64)
+	TimesExecuted() uint64
+	IncrementTimesExecuted()
+}
+
+type ProposalAction interface {
+	ProposalActionBase
+	ProposalActionConfiguration
+}
+
+type ProposalActionConfig struct {
+	Freq         uint64 `json:"frequency"`
+	MaxExecTimes uint64 `json:"max_execution_times"`
+	Times        uint64 `json:"-"`
+}
+
+func (c *ProposalActionConfig) Frequency() uint64 {
+	return c.Freq
+}
+
+func (c *ProposalActionConfig) SetFrequency(frequency uint64) {
+	c.Freq = frequency
+}
+
+func (c *ProposalActionConfig) MaxExecutionTimes() uint64 {
+	return c.MaxExecTimes
+}
+
+func (c *ProposalActionConfig) SetMaxExecutionTimes(maxExecTimes uint64) {
+	c.MaxExecTimes = maxExecTimes
+}
+
+func (c *ProposalActionConfig) TimesExecuted() uint64 {
+	return c.Times
+}
+
+func (c *ProposalActionConfig) IncrementTimesExecuted() {
+	c.Times++
+}
+
+type ConfiguredAction struct {
+	ProposalActionBase
+	*ProposalActionConfig
+}
+
+func ConfigureProposalAction(proposalActionBase ProposalActionBase, config *ProposalActionConfig) ProposalAction {
+	if config == nil {
+		config = &ProposalActionConfig{}
+	}
+
+	configuredActionObj := ConfiguredAction{
+		ProposalActionBase:   proposalActionBase,
+		ProposalActionConfig: config,
+	}
+
+	return configuredActionObj
 }
 
 func UnmarshallProposalAction(data []byte) (ProposalAction, error) {
@@ -45,7 +111,7 @@ func UnmarshallProposalAction(data []byte) (ProposalAction, error) {
 		return nil, errors.Wrap(err, "failed to unmarshall proposal action name")
 	}
 
-	var action ProposalAction
+	var action ProposalActionBase
 	switch actionNameObj.Name {
 	case "blob_gossip_delay":
 		action = &BlobGossipDelay{}
@@ -72,7 +138,14 @@ func UnmarshallProposalAction(data []byte) (ProposalAction, error) {
 	if err := json.Unmarshal(data, &action); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshall proposal action")
 	}
-	return action, nil
+
+	// Unmarshall the configuration
+	var config ProposalActionConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshall proposal action config")
+	}
+
+	return ConfigureProposalAction(action, &config), nil
 }
 
 type Default struct {
@@ -110,6 +183,14 @@ func (s Default) Fields() map[string]interface{} {
 func (s Default) GetTestPeerCount() int {
 	// By default we only create 1 test p2p and it's connected to all peers
 	return 1
+}
+
+func (s Default) CanExecute(
+	spec *beacon_common.Spec,
+	beaconBlockContents *deneb.BlockContents,
+) (bool, string) {
+	// No checks needed
+	return true, ""
 }
 
 func (s Default) Execute(
@@ -170,6 +251,17 @@ func (s BlobGossipDelay) Fields() map[string]interface{} {
 	return map[string]interface{}{
 		"delay_milliseconds": s.DelayMilliseconds,
 	}
+}
+
+func (s BlobGossipDelay) CanExecute(
+	spec *beacon_common.Spec,
+	beaconBlockContents *deneb.BlockContents,
+) (bool, string) {
+	// We require at least 1 blob to be able to delay gossiping it
+	if len(beaconBlockContents.Blobs) == 0 {
+		return false, "no blobs"
+	}
+	return true, ""
 }
 
 func (s BlobGossipDelay) Execute(
@@ -237,6 +329,17 @@ func (s EquivocatingBlobSidecars) Fields() map[string]interface{} {
 func (s EquivocatingBlobSidecars) GetTestPeerCount() int {
 	// We are going to send two conflicting blob sidecar bundles through two different test p2p connections
 	return 2
+}
+
+func (s EquivocatingBlobSidecars) CanExecute(
+	spec *beacon_common.Spec,
+	beaconBlockContents *deneb.BlockContents,
+) (bool, string) {
+	// We require at least 1 blob to create the equivocating blob sidecars
+	if len(beaconBlockContents.Blobs) == 0 {
+		return false, "no blobs"
+	}
+	return true, ""
 }
 
 func (s EquivocatingBlobSidecars) Execute(
@@ -322,6 +425,17 @@ func (s InvalidEquivocatingBlockAndBlobs) GetTestPeerCount() int {
 	return 2
 }
 
+func (s InvalidEquivocatingBlockAndBlobs) CanExecute(
+	spec *beacon_common.Spec,
+	beaconBlockContents *deneb.BlockContents,
+) (bool, string) {
+	// We require at least 1 blob to create the equivocating blob sidecars
+	if len(beaconBlockContents.Blobs) == 0 {
+		return false, "no blobs"
+	}
+	return true, ""
+}
+
 func (s InvalidEquivocatingBlockAndBlobs) Execute(
 	spec *beacon_common.Spec,
 	testPeers p2p.TestPeers,
@@ -385,6 +499,17 @@ func (s EquivocatingBlockHeaderInBlobs) Description() string {
 
 func (s EquivocatingBlockHeaderInBlobs) Fields() map[string]interface{} {
 	return map[string]interface{}{}
+}
+
+func (s EquivocatingBlockHeaderInBlobs) CanExecute(
+	spec *beacon_common.Spec,
+	beaconBlockContents *deneb.BlockContents,
+) (bool, string) {
+	// We require at least 1 blob
+	if len(beaconBlockContents.Blobs) == 0 {
+		return false, "no blobs"
+	}
+	return true, ""
 }
 
 func (s EquivocatingBlockHeaderInBlobs) Execute(
@@ -451,6 +576,14 @@ func (s InvalidEquivocatingBlock) Fields() map[string]interface{} {
 func (s InvalidEquivocatingBlock) GetTestPeerCount() int {
 	// We are going to send two conflicting blocks through two different test p2p connections
 	return 2
+}
+
+func (s InvalidEquivocatingBlock) CanExecute(
+	spec *beacon_common.Spec,
+	beaconBlockContents *deneb.BlockContents,
+) (bool, string) {
+	// No requirements
+	return true, ""
 }
 
 func (s InvalidEquivocatingBlock) Execute(
