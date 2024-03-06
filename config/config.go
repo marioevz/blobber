@@ -20,6 +20,7 @@ type Config struct {
 
 	ID                           uint64
 	Port                         int
+	ApiPort                      int
 	ProxiesPortStart             int
 	Host                         string
 	Spec                         *beacon.Spec
@@ -291,5 +292,17 @@ func WithAlwaysErrorValidatorResponse() Option {
 			return nil
 		},
 		description: "WithAlwaysErrorValidatorResponse()",
+	}
+}
+
+func WithApiPort(port int) Option {
+	return Option{
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.ApiPort = port
+			return nil
+		},
+		description: fmt.Sprintf("WithApiPort(%d)", port),
 	}
 }
