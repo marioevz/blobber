@@ -25,24 +25,25 @@ var (
 )
 
 func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, opts ...pubsub.PubOpt) error {
+	// Publish the message to the topic, retrying until we have peers to send the message to
+	// or the context is cancelled
+	start := time.Now()
 	for {
 		if len(topicHandle.ListPeers()) > 0 {
 			// Log list of peers we are sending the message to
-			peerIDs := make([]string, len(topicHandle.ListPeers()))
-			for i, peer := range topicHandle.ListPeers() {
-				peerIDs[i] = peer.String()
-			}
-			logrus.WithFields(logrus.Fields{
+			debugFields := logrus.Fields{
 				"topic":       topicHandle.String(),
-				"peers":       peerIDs,
 				"data-length": len(data),
-			}).Debug("sending message to peers")
-
+			}
+			for i, peer := range topicHandle.ListPeers() {
+				debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
+			}
+			logrus.WithFields(debugFields).Debug("sending message to peers")
 			return topicHandle.Publish(ctx, data, opts...)
 		}
 		select {
 		case <-ctx.Done():
-			return errors.Wrap(ctx.Err(), "topic list of peers was always empty")
+			return errors.Wrapf(ctx.Err(), "topic list of peers was always empty, waited for %s", time.Since(start))
 		case <-time.After(1 * time.Millisecond):
 		}
 	}
@@ -89,6 +90,7 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlo
 	if err != nil {
 		return errors.Wrap(err, "failed to join topic")
 	}
+	defer topicHandle.Close()
 	blockRoot := signedBeaconBlock.Message.HashTreeRoot(spec, tree.GetHashFn())
 	debugFields := logrus.Fields{
 		"id":         p.ID,
@@ -107,9 +109,14 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlo
 	logrus.WithFields(debugFields).Debug("Broadcasting signed beacon block deneb")
 
 	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
+		debugFields := logrus.Fields{}
+		for i, peer := range p.Host.Network().Peers() {
+			debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
+		}
+		logrus.WithFields(debugFields).Debug("connected network peers")
 		return errors.Wrap(err, "failed to publish topic")
 	}
-	return topicHandle.Close()
+	return nil
 }
 
 func (p TestPeers) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlockDeneb *deneb.SignedBeaconBlock) error {
@@ -149,6 +156,7 @@ func (p *TestPeer) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.Bl
 	if err != nil {
 		return errors.Wrap(err, "failed to join topic")
 	}
+	defer topicHandle.Close()
 
 	blockRoot := blobSidecar.SignedBlockHeader.Message.HashTreeRoot(tree.GetHashFn())
 	logrus.WithFields(logrus.Fields{
@@ -162,9 +170,14 @@ func (p *TestPeer) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.Bl
 	}).Debug("Broadcasting blob sidecar with signed block header")
 
 	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
+		debugFields := logrus.Fields{}
+		for i, peer := range p.Host.Network().Peers() {
+			debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
+		}
+		logrus.WithFields(debugFields).Debug("connected network peers")
 		return errors.Wrap(err, "failed to publish topic")
 	}
-	return topicHandle.Close()
+	return nil
 }
 
 func (p *TestPeer) BroadcastBlobSidecars(spec *common.Spec, blobSidecars ...*deneb.BlobSidecar) error {

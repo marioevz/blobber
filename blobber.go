@@ -364,17 +364,18 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 			return false, errors.Wrap(err, "failed to unmarshal slot")
 		}
 		blockVersion, blockBlobResponse, err := ParseResponse(response)
-		if err != nil {
+		if err != nil || blockBlobResponse == nil {
 			logrus.WithFields(logrus.Fields{
-				"proxy_id": id,
-				"version":  version,
-				"slot":     slot,
-				"response": string(response),
+				"proxy_id":   id,
+				"version":    version,
+				"slot":       slot,
+				"requestURL": request.URL.String(),
+				"response":   string(response),
 			}).Debug("Failed to parse response")
-			return false, errors.Wrap(err, "failed to parse response")
-		}
-		if blockBlobResponse == nil {
-			return false, errors.Wrap(err, "response is nil")
+			if err != nil {
+				return false, errors.Wrap(err, "failed to parse response")
+			}
+			return false, errors.New("failed to parse response")
 		}
 		var validatorKey *keys.ValidatorKey
 		if b.ValidatorKeys != nil {
@@ -412,28 +413,29 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 }
 
 type BlockDataStruct struct {
-	Version string          `json:"version"`
-	Data    json.RawMessage `json:"data"`
+	Version *string          `json:"version"`
+	Data    *json.RawMessage `json:"data"`
 }
 
 func ParseResponse(response []byte) (string, *deneb.BlockContents, error) {
 	var (
 		blockDataStruct BlockDataStruct
 	)
-	if err := json.Unmarshal(response, &blockDataStruct); err != nil {
-		return blockDataStruct.Version, nil, errors.Wrap(err, "failed to unmarshal response into BlockDataStruct")
+	if err := json.Unmarshal(response, &blockDataStruct); err != nil || blockDataStruct.Version == nil || blockDataStruct.Data == nil {
+		return "", nil, errors.Wrap(err, "failed to unmarshal response into BlockDataStruct")
 	}
 
-	if blockDataStruct.Version != "deneb" {
+	if *blockDataStruct.Version != "deneb" {
 		logrus.WithField("version", blockDataStruct.Version).Warn("Unsupported version, skipping actions")
-		return blockDataStruct.Version, nil, nil
+		logrus.WithField("response", string(response)).Debug("Unsupported version, skipping actions")
+		return *blockDataStruct.Version, nil, nil
 	}
 
-	decoder := json.NewDecoder(bytes.NewReader(blockDataStruct.Data))
+	decoder := json.NewDecoder(bytes.NewReader(*blockDataStruct.Data))
 	data := new(deneb.BlockContents)
 	if err := decoder.Decode(&data); err != nil {
-		return blockDataStruct.Version, nil, errors.Wrap(err, "failed to decode block contents")
+		return *blockDataStruct.Version, nil, errors.Wrap(err, "failed to decode block contents")
 	}
 
-	return blockDataStruct.Version, data, nil
+	return *blockDataStruct.Version, data, nil
 }
