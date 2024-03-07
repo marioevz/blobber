@@ -288,20 +288,46 @@ func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
 }
 
 func (b *Blobber) getProposalAction(slot uint64) (proposal_actions.ProposalAction, error) {
-
-	var proposalAction proposal_actions.ProposalAction
 	b.Lock()
 	defer b.Unlock()
 
-	if len(b.plannedActions) > 0 {
-		plannedAction := b.plannedActions[0]
-		b.plannedActions = b.plannedActions[1:]
-
-		return plannedAction, nil
+	for {
+		if len(b.plannedActions) == 0 {
+			break
+		}
+		if b.plannedActions[0].Frequency() > 1 {
+			logrus.WithFields(logrus.Fields{
+				"slot":      uint64(slot),
+				"frequency": b.plannedActions[0].Frequency(),
+				"name":      b.plannedActions[0].Name(),
+			}).Debug("Skipping planned action due to configured frequency")
+			break
+		}
+		if b.plannedActions[0].MaxExecutionTimes() > 0 && b.plannedActions[0].TimesExecuted() >= b.plannedActions[0].MaxExecutionTimes() {
+			logrus.WithFields(
+				logrus.Fields{
+					"slot":           uint64(slot),
+					"frequency":      b.plannedActions[0].Frequency(),
+					"max_execution":  b.plannedActions[0].MaxExecutionTimes(),
+					"times_executed": b.plannedActions[0].TimesExecuted(),
+					"name":           b.plannedActions[0].Name(),
+				},
+			).Debug("Removing planned action due to max execution times")
+			b.plannedActions = b.plannedActions[1:]
+			continue
+		}
+		logrus.WithFields(logrus.Fields{
+			"slot":           uint64(slot),
+			"frequency":      b.plannedActions[0].Frequency(),
+			"max_execution":  b.plannedActions[0].MaxExecutionTimes(),
+			"times_executed": b.plannedActions[0].TimesExecuted(),
+			"name":           b.plannedActions[0].Name(),
+		}).Info("Next queued planned action")
+		return b.plannedActions[0], nil
 	}
 
 	// Get the main configured proposal action
-	proposalAction = b.ProposalAction
+	proposalAction := b.ProposalAction
 
 	// Check the frequency
 	if proposalAction.Frequency() > 1 && uint64(slot)%proposalAction.Frequency() != 0 {
@@ -428,7 +454,7 @@ func (b *Blobber) executeProposalAction(trigger_cl *beacon_client.BeaconClient, 
 		b.builtBlocksMap.Lock()
 		b.builtBlocksMap.BlockRoots[blResponse.Block.Slot] = blockRoot
 		b.builtBlocksMap.Unlock()
-		b.ProposalAction.IncrementTimesExecuted()
+		proposalAction.IncrementTimesExecuted()
 	}
 	return executed, blockRoot, errors.Wrap(err, "failed to execute proposal action")
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/lithammer/dedent"
 	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/keys"
@@ -40,7 +41,7 @@ type ProposalActionBase interface {
 type ProposalActionResult struct {
 	Success    bool   `json:"success"`
 	Slot       uint64 `json:"slot"`
-	Root       []byte `json:"root"`
+	Root       hexutil.Bytes `json:"root"`
 	ActionName string `json:"action_name"`
 }
 
