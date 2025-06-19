@@ -19,9 +19,6 @@ type ENR interface {
 
 type BeaconClientPeer struct {
 	BeaconClient ENR
-
-	TCPPort int
-	UDPPort int
 }
 
 func multiAddressBuilderWithID(parsedIP net.IP, protocol string, port uint, id peer.ID) (ma.Multiaddr, error) {

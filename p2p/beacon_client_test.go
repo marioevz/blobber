@@ -58,7 +58,6 @@ func TestENRParsing(t *testing.T) {
 					t.Fatalf("parseENR() addr = %v, want %v", addr.String(), tt.wantMultiAddr[i])
 				}
 			}
-
 		})
 	}
 }

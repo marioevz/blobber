@@ -16,12 +16,12 @@ import (
 )
 
 type ValidatorProxy struct {
-	host       string
-	externalIP string
-	port       int
+	host string
+	port int
 
-	id     int
-	target *url.URL
+	id          int
+	target      *url.URL
+	alwaysError bool
 
 	srv    *http.Server
 	cancel context.CancelFunc
@@ -33,16 +33,16 @@ func NewProxy(
 	ctx context.Context,
 	id int,
 	host string,
-	externalIP net.IP,
 	port int,
 	destination string,
 	responseCallbacks map[string]ResponseCallback,
+	alwaysErrorResponse bool,
 ) (*ValidatorProxy, error) {
-
 	proxy := &ValidatorProxy{
-		host:       host,
-		externalIP: externalIP.String(),
-		port:       port,
+		host: host,
+		port: port,
+
+		alwaysError: alwaysErrorResponse,
 	}
 
 	router := mux.NewRouter()
@@ -55,7 +55,7 @@ func NewProxy(
 
 	reverseProxy := httputil.NewSingleHostReverseProxy(proxy.target)
 	for method, callback := range responseCallbacks {
-		router.HandleFunc(method, proxyHandler(proxy.target, reverseProxy, callback))
+		router.HandleFunc(method, proxy.proxyHandler(reverseProxy, callback))
 	}
 	router.PathPrefix("/").Handler(reverseProxy)
 
@@ -79,10 +79,6 @@ func (p *ValidatorProxy) ID() int {
 	return p.id
 }
 
-func (p *ValidatorProxy) ExternalIP() string {
-	return p.externalIP
-}
-
 func (p *ValidatorProxy) Port() int {
 	return p.port
 }
@@ -91,7 +87,7 @@ func (p *ValidatorProxy) Address() string {
 	return fmt.Sprintf("http://%s:%d", p.host, p.port)
 }
 
-func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallback) func(http.ResponseWriter, *http.Request) {
+func (v *ValidatorProxy) proxyHandler(p *httputil.ReverseProxy, callback ResponseCallback) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// we need to buffer the body if we want to read it here and send it
 		// in the request.
@@ -104,7 +100,7 @@ func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallb
 		// you can reassign the body if you need to parse it as multipart
 		r.Body = io.NopCloser(bytes.NewReader(body))
 
-		fullUrl := url.JoinPath(r.URL.Path)
+		fullUrl := v.target.JoinPath(r.URL.Path)
 		proxyReq, err := http.NewRequest(r.Method, fullUrl.String(), bytes.NewReader(body))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -123,6 +119,7 @@ func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallb
 		// proxyReq.Header = req.Header
 		proxyReq.Header = make(http.Header)
 		fields := make(logrus.Fields)
+		fields["fullUrl"] = fullUrl.String()
 		for h, val := range r.Header {
 			if h == "Accept-Encoding" {
 				// Remove encoding from the request so we are able to decode it
@@ -159,6 +156,10 @@ func proxyHandler(url *url.URL, p *httputil.ReverseProxy, callback ResponseCallb
 
 		if override, err := callback(r, modifiedResp); err != nil {
 			logrus.WithError(err).Error("Could not execute callback, returning response to validator client")
+			if v.alwaysError {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		} else if override {
 			logrus.WithFields(logrus.Fields{
 				"method": r.Method,
@@ -202,7 +203,7 @@ func (p *ValidatorProxy) Start(ctx context.Context) error {
 		"validator_proxy_id": p.id,
 		"port":               p.port,
 		// "pubkey":             p.pkBeacon.String(),
-		"destination_address": p.Address(),
+		"listening_endpoint": p.Address(),
 	}
 	logrus.WithFields(fields).Info("Proxy now listening")
 	go func() {
