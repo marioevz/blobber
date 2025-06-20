@@ -68,6 +68,9 @@ func init() {
 }
 
 func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
+	logrus.Info("Creating new Blobber instance")
+	logrus.Infof("Number of options to apply: %d", len(opts))
+	
 	b := &Blobber{
 		ctx: ctx,
 
@@ -92,10 +95,13 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 		rejectBlobRecord:  common.NewBlobRecord(),
 	}
 
+	logrus.Info("Applying configuration options...")
 	// Apply the options
 	if err := b.Config.Apply(opts...); err != nil {
+		logrus.Errorf("Failed to apply options: %v", err)
 		return nil, errors.Wrap(err, "failed to apply options")
 	}
+	logrus.Info("Successfully applied all configuration options")
 
 	if b.Spec == nil {
 		return nil, fmt.Errorf("no spec configured")

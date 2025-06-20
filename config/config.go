@@ -36,11 +36,16 @@ type Config struct {
 }
 
 func (cfg *Config) Apply(opts ...Option) error {
-	for _, opt := range opts {
+	logrus.Infof("Config.Apply called with %d options", len(opts))
+	for i, opt := range opts {
+		logrus.Infof("Applying option %d: %s", i, opt.Description)
 		if err := opt.apply(cfg); err != nil {
+			logrus.Errorf("Failed to apply option %d (%s): %v", i, opt.Description, err)
 			return err
 		}
+		logrus.Infof("Successfully applied option %d: %s", i, opt.Description)
 	}
+	logrus.Info("All options applied successfully")
 	return nil
 }
 
@@ -271,7 +276,10 @@ func WithProposalAction(action proposal_actions.ProposalAction) Option {
 
 func WithProposalActionFrequency(freq uint64) Option {
 	// This function should not be called anymore!
-	fmt.Printf("WARNING: WithProposalActionFrequency called with freq=%d\n", freq)
+	fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+	fmt.Printf("!!! UNEXPECTED CALL TO WithProposalActionFrequency !!!\n")
+	fmt.Printf("!!! freq=%d !!!\n", freq)
+	fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 	fmt.Println("Stack trace:")
 	for i := 1; i < 10; i++ {
 		pc, file, line, ok := runtime.Caller(i)
@@ -280,6 +288,7 @@ func WithProposalActionFrequency(freq uint64) Option {
 		}
 		fmt.Printf("  %s:%d %s\n", file, line, runtime.FuncForPC(pc).Name())
 	}
+	fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 	
 	return Option{
 		apply: func(cfg *Config) error {

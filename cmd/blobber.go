@@ -19,6 +19,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+func init() {
+	fmt.Println("=== BLOBBER INIT ===")
+	fmt.Printf("Binary started with args: %v\n", os.Args)
+}
+
 type Logger struct{}
 
 func (l *Logger) Logf(msg string, args ...interface{}) {
@@ -194,8 +199,11 @@ func main() {
 	}
 
 	if len(clEndpoints) == 0 {
+		fmt.Println("ERROR: No consensus layer endpoints provided")
 		fatalf("at least one consensus layer client endpoint is required")
 	}
+	
+	fmt.Printf("Found %d CL endpoints\n", len(clEndpoints))
 
 	type beaconEndpoint struct {
 		BeaconClient *beacon.BeaconClientAdapter
@@ -257,6 +265,20 @@ func main() {
 	}
 	wg.Wait()
 
+	fmt.Println("=== BEACON CLIENTS INITIALIZED ===")
+	fmt.Printf("Number of beacon clients: %d\n", len(beaconClients))
+	for i, bc := range beaconClients {
+		fmt.Printf("Beacon client %d: validator=%v\n", i, bc.Validator)
+	}
+
+	fmt.Println("=== BUILDING CONFIGURATION OPTIONS ===")
+	fmt.Printf("hostIP: %s\n", hostIP)
+	fmt.Printf("externalIP: %s\n", externalIP)
+	fmt.Printf("blobberID: %d\n", blobberID)
+	fmt.Printf("beaconPortStart: %d\n", beaconPortStart)
+	fmt.Printf("validatorProxyPortStart: %d\n", validatorProxyPortStart)
+	fmt.Printf("logLevel: %s\n", logLevel)
+	
 	// Build base options first
 	blobberOpts := []config.Option{
 		config.WithHost(hostIP),
@@ -270,14 +292,20 @@ func main() {
 		config.WithMaxDevP2PSessionReuses(maxDevP2PSessionReuses),
 		config.WithLogLevel(logLevel),
 	}
+	fmt.Printf("Created %d base options\n", len(blobberOpts))
 
 	if validatorKeyFilePath != "" && validatorKeyFolderPath != "" {
 		fatalf("cannot specify both validator-key-file and validator-key-folder")
 	}
 
+	fmt.Printf("validatorKeyFilePath: '%s'\n", validatorKeyFilePath)
+	fmt.Printf("validatorKeyFolderPath: '%s'\n", validatorKeyFolderPath)
+	
 	if validatorKeyFilePath != "" {
+		fmt.Printf("Adding validator keys from file: %s\n", validatorKeyFilePath)
 		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFile(validatorKeyFilePath))
 	} else if validatorKeyFolderPath != "" {
+		fmt.Printf("Adding validator keys from folder: %s\n", validatorKeyFolderPath)
 		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFolder(validatorKeyFolderPath))
 	}
 
@@ -297,24 +325,38 @@ func main() {
 	fmt.Printf("After trim, proposalActionJson: '%s' (len=%d)\n", proposalActionJson, len(proposalActionJson))
 	
 	if proposalActionJson != "" && proposalActionJson != "{}" {
+		fmt.Println("=== PARSING PROPOSAL ACTION ===")
 		logrus.Infof("Parsing proposal action JSON...")
+		fmt.Printf("About to parse JSON: '%s'\n", proposalActionJson)
+		
 		proposalAction, err := proposal_actions.UnmarshallProposalAction([]byte(proposalActionJson))
 		if err != nil {
+			fmt.Printf("ERROR parsing proposal action: %v\n", err)
+			logrus.Errorf("Failed to parse proposal action JSON: %v", err)
 			fatalf("error parsing proposal action JSON '%s': %v\n", proposalActionJson, err)
 		}
+		
+		fmt.Printf("Successfully parsed proposal action: %+v\n", proposalAction)
 		logrus.Infof("Successfully parsed proposal action: %v", proposalAction)
 		
 		// Set the frequency on the proposal action before adding it
 		if proposalActionFrequency > 0 {
+			fmt.Printf("Setting frequency %d on proposal action\n", proposalActionFrequency)
 			logrus.Infof("Setting frequency %d on proposal action before adding to options", proposalActionFrequency)
 			proposalAction.SetFrequency(uint64(proposalActionFrequency))
 		}
 		
 		// Now add the proposal action with frequency already set
+		fmt.Println("Adding proposal action to options...")
 		blobberOpts = append(blobberOpts, config.WithProposalAction(proposalAction))
-	} else if proposalActionFrequency != 1 {
-		// If no proposal action but frequency is set to non-default value, error out
-		fatalf("proposal-action-frequency=%d specified but no proposal-action provided\n", proposalActionFrequency)
+		fmt.Printf("Total options after adding proposal action: %d\n", len(blobberOpts))
+	} else {
+		fmt.Printf("No proposal action to parse (json='%s', len=%d)\n", proposalActionJson, len(proposalActionJson))
+		if proposalActionFrequency != 1 {
+			// If no proposal action but frequency is set to non-default value, error out
+			fmt.Printf("ERROR: frequency=%d but no proposal action\n", proposalActionFrequency)
+			fatalf("proposal-action-frequency=%d specified but no proposal-action provided\n", proposalActionFrequency)
+		}
 	}
 
 	if stateValidatorFetchTimeoutSeconds > 0 {
@@ -334,6 +376,7 @@ func main() {
 		fatalf("error creating blobber: %v\n", err)
 	}
 	fmt.Println("=== BLOBBER CREATED SUCCESSFULLY ===")
+	logrus.Info("Blobber instance created successfully")
 
 	for _, bn := range beaconClients {
 		// Pass the adapter itself
