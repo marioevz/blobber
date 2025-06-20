@@ -20,8 +20,15 @@ import (
 )
 
 func init() {
-	fmt.Println("=== BLOBBER INIT ===")
-	fmt.Printf("Binary started with args: %v\n", os.Args)
+	// Use stderr to ensure this is visible
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "########################################")
+	fmt.Fprintln(os.Stderr, "# BLOBBER INIT (refactor-v6-debug)    #")
+	fmt.Fprintln(os.Stderr, "########################################")
+	fmt.Fprintf(os.Stderr, "# Binary: %s\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "# Args: %v\n", os.Args[1:])
+	fmt.Fprintln(os.Stderr, "########################################")
+	fmt.Fprintln(os.Stderr, "")
 }
 
 type Logger struct{}
@@ -60,11 +67,30 @@ func fatal(err error) {
 }
 
 func main() {
-	// Log startup
-	fmt.Println("=== BLOBBER STARTING ===")
-	fmt.Printf("Version: %s\n", "refactor-v5")
-	fmt.Printf("Args: %v\n", os.Args)
-	fmt.Printf("Working directory: %s\n", mustGetwd())
+	// Log startup - this MUST appear if the new binary is being used
+	fmt.Fprintf(os.Stderr, "=== BLOBBER STARTING (v6-debug) ===\n")
+	fmt.Fprintf(os.Stderr, "Version: refactor-v6-debug\n")
+	fmt.Fprintf(os.Stderr, "Args (%d): %v\n", len(os.Args), os.Args)
+	fmt.Fprintf(os.Stderr, "Working directory: %s\n", mustGetwd())
+	
+	// Check if proposal action args are present
+	hasProposalAction := false
+	hasFrequency := false
+	for _, arg := range os.Args[1:] {
+		if strings.HasPrefix(arg, "--proposal-action=") || strings.HasPrefix(arg, "-proposal-action=") {
+			hasProposalAction = true
+			fmt.Fprintf(os.Stderr, "Found proposal-action arg: %s\n", arg)
+		}
+		if strings.HasPrefix(arg, "--proposal-action-frequency=") || strings.HasPrefix(arg, "-proposal-action-frequency=") {
+			hasFrequency = true
+			fmt.Fprintf(os.Stderr, "Found proposal-action-frequency arg: %s\n", arg)
+		}
+	}
+	
+	if !hasProposalAction && !hasFrequency {
+		fmt.Fprintf(os.Stderr, "WARNING: No proposal action arguments found in command line!\n")
+		fmt.Fprintf(os.Stderr, "This suggests blobber_extra_params are not being passed from Kurtosis.\n")
+	}
 	
 	var (
 		clEndpoints                       arrayFlags
@@ -181,14 +207,16 @@ func main() {
 	)
 
 	fmt.Println("=== PARSING FLAGS ===")
+	fmt.Fprintf(os.Stderr, "=== PARSING FLAGS ===\n")
 	err := flag.CommandLine.Parse(os.Args[1:])
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: Failed to parse flags: %v\n", err)
 		panic(err)
 	}
 
-	fmt.Println("=== FLAGS PARSED ===")
-	fmt.Printf("proposalActionJson: '%s'\n", proposalActionJson)
-	fmt.Printf("proposalActionFrequency: %d\n", proposalActionFrequency)
+	fmt.Fprintf(os.Stderr, "=== FLAGS PARSED SUCCESSFULLY ===\n")
+	fmt.Fprintf(os.Stderr, "proposalActionJson: '%s'\n", proposalActionJson)
+	fmt.Fprintf(os.Stderr, "proposalActionFrequency: %d\n", proposalActionFrequency)
 	fmt.Printf("clEndpoints: %v\n", clEndpoints)
 	fmt.Printf("externalIP: %s\n", externalIP)
 	fmt.Printf("unsafeMode: %v\n", unsafeMode)

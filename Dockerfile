@@ -10,7 +10,10 @@ COPY . .
 RUN go mod download
 
 # Build the application statically
-RUN GOOS=${GOOS} go build -o blobber.bin ./cmd/blobber.go
+RUN echo "Building blobber with debug logging..." && \
+    GOOS=${GOOS} go build -o blobber.bin ./cmd/blobber.go && \
+    echo "Build complete, binary size:" && \
+    ls -la blobber.bin
 
 FROM debian:bullseye-slim
 
@@ -20,5 +23,8 @@ RUN apt-get update && apt-get install -y curl
 
 # Ensure the binary is executable
 RUN chmod +x /blobber.bin
+
+# Add a version check
+RUN echo "Testing binary..." && /blobber.bin --help 2>&1 | head -5 || true
 
 ENTRYPOINT ["/blobber.bin"]

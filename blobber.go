@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,9 +98,23 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 	}
 
 	logrus.Info("Applying configuration options...")
+	fmt.Fprintf(os.Stderr, "DEBUG: About to apply %d options\n", len(opts))
+	
 	// Apply the options
 	if err := b.Config.Apply(opts...); err != nil {
 		logrus.Errorf("Failed to apply options: %v", err)
+		fmt.Fprintf(os.Stderr, "ERROR: Failed to apply options: %v\n", err)
+		
+		// Check if this is the specific error we're seeing
+		if strings.Contains(err.Error(), "cannot set ProposalActionFrequency without ProposalAction") {
+			fmt.Fprintf(os.Stderr, "\n!!! KNOWN ISSUE DETECTED !!!\n")
+			fmt.Fprintf(os.Stderr, "This error occurs when proposal action parameters are not passed correctly.\n")
+			fmt.Fprintf(os.Stderr, "Check that blobber_extra_params in your Kurtosis YAML includes:\n")
+			fmt.Fprintf(os.Stderr, "  - '--proposal-action={\"name\": \"blob_gossip_delay\", \"delay_milliseconds\": 1500}'\n")
+			fmt.Fprintf(os.Stderr, "  - '--proposal-action-frequency=1'\n")
+			fmt.Fprintf(os.Stderr, "\nCurrent command line args: %v\n", os.Args)
+		}
+		
 		return nil, errors.Wrap(err, "failed to apply options")
 	}
 	logrus.Info("Successfully applied all configuration options")
