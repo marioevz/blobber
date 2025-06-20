@@ -265,7 +265,10 @@ func main() {
 	logrus.Infof("proposalActionFrequency: %d", proposalActionFrequency)
 	
 	// Handle proposal action and frequency together
-	if proposalActionJson != "" {
+	// Trim any whitespace that might have been introduced
+	proposalActionJson = strings.TrimSpace(proposalActionJson)
+	
+	if proposalActionJson != "" && proposalActionJson != "{}" {
 		logrus.Infof("Parsing proposal action JSON...")
 		proposalAction, err := proposal_actions.UnmarshallProposalAction([]byte(proposalActionJson))
 		if err != nil {
