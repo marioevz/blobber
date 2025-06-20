@@ -244,7 +244,6 @@ func main() {
 		config.WithGenesisValidatorsRoot(*beaconClients[0].BeaconClient.Config.GenesisValidatorsRoot),
 		config.WithBeaconPortStart(beaconPortStart),
 		config.WithProxiesPortStart(validatorProxyPortStart),
-		config.WithProposalActionFrequency(uint64(proposalActionFrequency)),
 		config.WithMaxDevP2PSessionReuses(maxDevP2PSessionReuses),
 		config.WithLogLevel(logLevel),
 	}
@@ -265,6 +264,10 @@ func main() {
 			fatalf("error parsing proposal action: %v\n", err)
 		}
 		blobberOpts = append(blobberOpts, config.WithProposalAction(proposalAction))
+		// Only set frequency after the proposal action is set
+		if proposalActionFrequency > 0 {
+			blobberOpts = append(blobberOpts, config.WithProposalActionFrequency(uint64(proposalActionFrequency)))
+		}
 	}
 
 	if stateValidatorFetchTimeoutSeconds > 0 {
