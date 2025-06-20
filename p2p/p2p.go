@@ -23,7 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/pkg/errors"
-	"github.com/protolambda/zrnt/eth2/beacon/common"
+	bitfield "github.com/prysmaticlabs/go-bitfield"
 	"github.com/sirupsen/logrus"
 
 	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p/encoder"
@@ -39,6 +39,19 @@ const (
 )
 
 const pubsubQueueSize = 600
+
+// Metadata represents p2p metadata of a node
+type Metadata struct {
+	SeqNumber uint64
+	Attnets   bitfield.Bitvector64
+	Syncnets  bitfield.Bitvector4
+}
+
+// Goodbye is the goodbye reason code
+type Goodbye uint64
+
+// Ping is the ping sequence number
+type Ping uint64
 
 type TestP2P struct {
 	InstanceID  uint64
@@ -104,7 +117,7 @@ type TestPeer struct {
 
 	ctx      context.Context
 	cancel   context.CancelFunc
-	MetaData *common.MetaData
+	MetaData *Metadata
 	state    *Status
 }
 
@@ -238,10 +251,10 @@ func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error
 		PrivateKey: priv,
 		PublicKey:  pub,
 		LocalNode:  localNode,
-		MetaData: &common.MetaData{
+		MetaData: &Metadata{
 			SeqNumber: 0,
-			Attnets:   common.AttnetBits{},
-			Syncnets:  common.SyncnetBits{},
+			Attnets:   bitfield.Bitvector64{},
+			Syncnets:  bitfield.Bitvector4{},
 		},
 
 		state: t.ChainStatus,
@@ -296,7 +309,7 @@ func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 		"id":              p.ID,
 		"protocol":        s.Protocol(),
 		"peer":            s.Conn().RemotePeer().String(),
-		"fork_digest":     p.state.ForkDigest.String(),
+		"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
 		"finalized_root":  p.state.FinalizedRoot.String(),
 		"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
 		"head_root":       p.state.HeadRoot.String(),
@@ -304,7 +317,7 @@ func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 	}).Debug("Sending initial status")
 
 	// Send request
-	if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(p.state)); err != nil {
+	if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(p.state.StatusData)); err != nil {
 		return errors.Wrap(err, "failed to encode outgoing message")
 	}
 	// Done sending request
@@ -366,7 +379,7 @@ func (p *TestPeer) SetupStreams() error {
 			"peer":     s.Conn().RemotePeer().String(),
 		}).Debug("Got a new stream")
 		// Read the incoming message into the appropriate struct.
-		var out common.Status
+		var out StatusData
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, WrapSSZObject(&out)); err != nil {
 			logrus.WithError(err).Error("Failed to decode incoming message")
 			return
@@ -376,7 +389,7 @@ func (p *TestPeer) SetupStreams() error {
 			"id":              p.ID,
 			"protocol":        s.Protocol(),
 			"peer":            s.Conn().RemotePeer().String(),
-			"fork_digest":     out.ForkDigest.String(),
+			"fork_digest":     fmt.Sprintf("%x", out.ForkDigest),
 			"finalized_root":  out.FinalizedRoot.String(),
 			"finalized_epoch": fmt.Sprintf("%d", out.FinalizedEpoch),
 			"head_root":       out.HeadRoot.String(),
@@ -392,7 +405,7 @@ func (p *TestPeer) SetupStreams() error {
 			"id":              p.ID,
 			"protocol":        s.Protocol(),
 			"peer":            s.Conn().RemotePeer().String(),
-			"fork_digest":     p.state.ForkDigest.String(),
+			"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
 			"finalized_root":  p.state.FinalizedRoot.String(),
 			"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
 			"head_root":       p.state.HeadRoot.String(),
@@ -404,7 +417,7 @@ func (p *TestPeer) SetupStreams() error {
 			logrus.WithError(err).Error("Failed to send status response")
 			return
 		}
-		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(p.state)); err != nil {
+		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(p.state.StatusData)); err != nil {
 			logrus.WithError(err).Error("Failed to encode outgoing message")
 			return
 		} else {
@@ -428,7 +441,7 @@ func (p *TestPeer) SetupStreams() error {
 			"peer":     s.Conn().RemotePeer().String(),
 		}).Debug("Got a new stream")
 		// Read the incoming message into the appropriate struct.
-		var out common.Goodbye
+		var out Goodbye
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, WrapSSZObject(&out)); err != nil {
 			logrus.WithError(err).Error("Failed to decode incoming message")
 			return
@@ -442,7 +455,7 @@ func (p *TestPeer) SetupStreams() error {
 		}).Debug("Received data")
 
 		// Construct response
-		var resp common.Goodbye
+		var resp Goodbye
 
 		// Send response
 		if _, err := s.Write([]byte{0x00}); err != nil {
@@ -472,7 +485,7 @@ func (p *TestPeer) SetupStreams() error {
 			"peer":     s.Conn().RemotePeer().String(),
 		}).Debug("Got a new stream")
 		// Read the incoming message into the appropriate struct.
-		var out common.PingData
+		var out Ping
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, WrapSSZObject(&out)); err != nil {
 			logrus.WithError(err).Error("Failed to decode incoming message")
 			return
@@ -486,7 +499,7 @@ func (p *TestPeer) SetupStreams() error {
 		}).Debug("Received data")
 
 		// Construct response
-		resp := common.PingData(p.MetaData.SeqNumber)
+		resp := Ping(p.MetaData.SeqNumber)
 		// Send response
 		if _, err := s.Write([]byte{0x00}); err != nil {
 			logrus.WithError(err).Error("Failed to send status response")
@@ -553,7 +566,7 @@ func (p *TestPeer) Goodbye(ctx context.Context, peer peer.ID) error {
 		return errors.Wrap(err, "failed to open stream")
 	}
 
-	var resp common.Goodbye
+	var resp Goodbye
 	if _, err := s.Write([]byte{0x00}); err != nil {
 		return errors.Wrap(err, "failed write response chunk byte")
 	}

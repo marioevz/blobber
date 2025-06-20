@@ -11,10 +11,8 @@ import (
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
+	"github.com/attestantio/go-eth2-client/spec/deneb"
 	"github.com/pkg/errors"
-	"github.com/protolambda/zrnt/eth2/beacon/common"
-	"github.com/protolambda/zrnt/eth2/beacon/deneb"
-	"github.com/protolambda/ztyp/tree"
 	fastssz "github.com/prysmaticlabs/fastssz"
 	"github.com/sirupsen/logrus"
 )
@@ -70,7 +68,7 @@ func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, []byte, error) {
 	return b, s.Sum(nil)[:20], nil
 }
 
-func (p *TestPeer) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlock *deneb.SignedBeaconBlock) error {
+func (p *TestPeer) BroadcastSignedBeaconBlock(spec map[string]interface{}, signedBeaconBlock *deneb.SignedBeaconBlock) error {
 	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
 	defer cancel()
 	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
@@ -91,11 +89,14 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlo
 		return errors.Wrap(err, "failed to join topic")
 	}
 	defer topicHandle.Close()
-	blockRoot := signedBeaconBlock.Message.HashTreeRoot(spec, tree.GetHashFn())
+	blockRoot, err := signedBeaconBlock.Message.HashTreeRoot()
+	if err != nil {
+		return errors.Wrap(err, "failed to compute block root")
+	}
 	debugFields := logrus.Fields{
 		"id":         p.ID,
 		"topic":      topic,
-		"block_root": blockRoot.String(),
+		"block_root": fmt.Sprintf("%x", blockRoot),
 		"state_root": signedBeaconBlock.Message.StateRoot.String(),
 		"slot":       signedBeaconBlock.Message.Slot,
 		"signature":  signedBeaconBlock.Signature.String(),
@@ -119,7 +120,7 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlo
 	return nil
 }
 
-func (p TestPeers) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlockDeneb *deneb.SignedBeaconBlock) error {
+func (p TestPeers) BroadcastSignedBeaconBlock(spec map[string]interface{}, signedBeaconBlockDeneb *deneb.SignedBeaconBlock) error {
 	for _, p2p := range p {
 		if err := p2p.BroadcastSignedBeaconBlock(spec, signedBeaconBlockDeneb); err != nil {
 			return err
@@ -128,7 +129,7 @@ func (p TestPeers) BroadcastSignedBeaconBlock(spec *common.Spec, signedBeaconBlo
 	return nil
 }
 
-func (p *TestPeer) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
+func (p *TestPeer) BroadcastBlobSidecar(spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
 	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
 	defer cancel()
 	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
@@ -158,11 +159,14 @@ func (p *TestPeer) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.Bl
 	}
 	defer topicHandle.Close()
 
-	blockRoot := blobSidecar.SignedBlockHeader.Message.HashTreeRoot(tree.GetHashFn())
+	blockRoot, err := blobSidecar.SignedBlockHeader.Message.HashTreeRoot()
+	if err != nil {
+		return errors.Wrap(err, "failed to compute block root")
+	}
 	logrus.WithFields(logrus.Fields{
 		"id":             p.ID,
 		"topic":          topic,
-		"block_root":     blockRoot.String(),
+		"block_root":     fmt.Sprintf("%x", blockRoot),
 		"index":          blobSidecar.Index,
 		"slot":           blobSidecar.SignedBlockHeader.Message.Slot,
 		"kzg_commitment": blobSidecar.KZGCommitment.String(),
@@ -180,7 +184,7 @@ func (p *TestPeer) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.Bl
 	return nil
 }
 
-func (p *TestPeer) BroadcastBlobSidecars(spec *common.Spec, blobSidecars ...*deneb.BlobSidecar) error {
+func (p *TestPeer) BroadcastBlobSidecars(spec map[string]interface{}, blobSidecars ...*deneb.BlobSidecar) error {
 	for _, blobSidecar := range blobSidecars {
 		if err := p.BroadcastBlobSidecar(spec, blobSidecar, nil); err != nil {
 			return err
@@ -189,7 +193,7 @@ func (p *TestPeer) BroadcastBlobSidecars(spec *common.Spec, blobSidecars ...*den
 	return nil
 }
 
-func (p TestPeers) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
+func (p TestPeers) BroadcastBlobSidecar(spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
 	for _, p2p := range p {
 		if err := p2p.BroadcastBlobSidecar(spec, blobSidecar, subnet); err != nil {
 			return err
@@ -198,7 +202,7 @@ func (p TestPeers) BroadcastBlobSidecar(spec *common.Spec, blobSidecar *deneb.Bl
 	return nil
 }
 
-func (p TestPeers) BroadcastBlobSidecars(spec *common.Spec, blobSidecars ...*deneb.BlobSidecar) error {
+func (p TestPeers) BroadcastBlobSidecars(spec map[string]interface{}, blobSidecars ...*deneb.BlobSidecar) error {
 	for _, p2p := range p {
 		if err := p2p.BroadcastBlobSidecars(spec, blobSidecars...); err != nil {
 			return err

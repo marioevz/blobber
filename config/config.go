@@ -5,11 +5,10 @@ import (
 	"net"
 	"sync"
 
+	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/marioevz/blobber/proposal_actions"
-	beacon "github.com/protolambda/zrnt/eth2/beacon/common"
-	"github.com/protolambda/ztyp/tree"
 	"github.com/sirupsen/logrus"
 )
 
@@ -22,11 +21,11 @@ type Config struct {
 	Port                         int
 	ProxiesPortStart             int
 	Host                         string
-	Spec                         *beacon.Spec
+	Spec                         map[string]interface{} // Spec configuration as used by go-eth2-client
 	ExternalIP                   net.IP
-	BeaconGenesisTime            beacon.Timestamp
-	GenesisValidatorsRoot        tree.Root
-	ValidatorKeys                map[beacon.ValidatorIndex]*keys.ValidatorKey
+	BeaconGenesisTime            uint64
+	GenesisValidatorsRoot        phase0.Root
+	ValidatorKeys                map[phase0.ValidatorIndex]*keys.ValidatorKey
 	ValidatorKeysList            []*keys.ValidatorKey
 	AlwaysErrorValidatorResponse bool
 
@@ -165,7 +164,7 @@ func WithProxiesPortStart(portStart int) Option {
 	}
 }
 
-func WithSpec(spec *beacon.Spec) Option {
+func WithSpec(spec map[string]interface{}) Option {
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()
@@ -177,7 +176,7 @@ func WithSpec(spec *beacon.Spec) Option {
 	}
 }
 
-func WithBeaconGenesisTime(t beacon.Timestamp) Option {
+func WithBeaconGenesisTime(t uint64) Option {
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()
@@ -189,7 +188,7 @@ func WithBeaconGenesisTime(t beacon.Timestamp) Option {
 	}
 }
 
-func WithGenesisValidatorsRoot(t tree.Root) Option {
+func WithGenesisValidatorsRoot(t phase0.Root) Option {
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()
@@ -201,7 +200,7 @@ func WithGenesisValidatorsRoot(t tree.Root) Option {
 	}
 }
 
-func WithValidatorKeys(vk map[beacon.ValidatorIndex]*keys.ValidatorKey) Option {
+func WithValidatorKeys(vk map[phase0.ValidatorIndex]*keys.ValidatorKey) Option {
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()

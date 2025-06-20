@@ -7,29 +7,37 @@ import (
 	"github.com/lithammer/dedent"
 	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/keys"
+	"github.com/marioevz/blobber/kzg"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/pkg/errors"
-	beacon_common "github.com/protolambda/zrnt/eth2/beacon/common"
-	"github.com/protolambda/zrnt/eth2/beacon/deneb"
+	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
+	"github.com/attestantio/go-eth2-client/spec/deneb"
+	"github.com/attestantio/go-eth2-client/spec/phase0"
 )
 
 const MAX_BLOBS_PER_BLOCK = 6
 
+// Ensure imports are used
+var (
+	_ = deneb.BlobSidecar{}
+	_ = kzg.RandomBlob
+)
+
 type ProposalActionBase interface {
 	Name() string
 	Description() string
-	SlotMiss(spec *beacon_common.Spec) bool
+	SlotMiss(spec map[string]interface{}) bool
 	Fields() map[string]interface{}
 	GetTestPeerCount() int
 	CanExecute(
-		spec *beacon_common.Spec,
-		beaconBlockContents *deneb.BlockContents,
+		spec map[string]interface{},
+		beaconBlockContents *apiv1deneb.BlockContents,
 	) (bool, string)
 	Execute(
-		spec *beacon_common.Spec,
+		spec map[string]interface{},
 		testPeers p2p.TestPeers,
-		beaconBlockContents *deneb.BlockContents,
-		beaconBlockDomain beacon_common.BLSDomain,
+		beaconBlockContents *apiv1deneb.BlockContents,
+		beaconBlockDomain phase0.Domain,
 		validatorKey *keys.ValidatorKey,
 		includeBlobRecord *common.BlobRecord,
 		rejectBlobRecord *common.BlobRecord,
@@ -172,7 +180,7 @@ func (s Default) Description() string {
 	return desc
 }
 
-func (s Default) SlotMiss(_ *beacon_common.Spec) bool {
+func (s Default) SlotMiss(_ map[string]interface{}) bool {
 	return false
 }
 
@@ -186,18 +194,18 @@ func (s Default) GetTestPeerCount() int {
 }
 
 func (s Default) CanExecute(
-	spec *beacon_common.Spec,
-	beaconBlockContents *deneb.BlockContents,
+	spec map[string]interface{},
+	beaconBlockContents *apiv1deneb.BlockContents,
 ) (bool, string) {
 	// No checks needed
 	return true, ""
 }
 
 func (s Default) Execute(
-	spec *beacon_common.Spec,
+	spec map[string]interface{},
 	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
@@ -242,9 +250,14 @@ func (s BlobGossipDelay) Description() string {
 		- Broadcast the blob sidecars`), s.DelayMilliseconds)
 }
 
-func (s BlobGossipDelay) SlotMiss(spec *beacon_common.Spec) bool {
+func (s BlobGossipDelay) SlotMiss(spec map[string]interface{}) bool {
 	// Consider a slot miss only if the delay is more than half a slot
-	return s.DelayMilliseconds >= int(spec.SECONDS_PER_SLOT*1000)/2
+	secondsPerSlot, ok := spec["SECONDS_PER_SLOT"].(uint64)
+	if !ok {
+		// Default to 12 seconds if not found
+		secondsPerSlot = 12
+	}
+	return s.DelayMilliseconds >= int(secondsPerSlot*1000)/2
 }
 
 func (s BlobGossipDelay) Fields() map[string]interface{} {
@@ -254,8 +267,8 @@ func (s BlobGossipDelay) Fields() map[string]interface{} {
 }
 
 func (s BlobGossipDelay) CanExecute(
-	spec *beacon_common.Spec,
-	beaconBlockContents *deneb.BlockContents,
+	spec map[string]interface{},
+	beaconBlockContents *apiv1deneb.BlockContents,
 ) (bool, string) {
 	// We require at least 1 blob to be able to delay gossiping it
 	if len(beaconBlockContents.Blobs) == 0 {
@@ -265,10 +278,10 @@ func (s BlobGossipDelay) CanExecute(
 }
 
 func (s BlobGossipDelay) Execute(
-	spec *beacon_common.Spec,
+	spec map[string]interface{},
 	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
@@ -332,8 +345,8 @@ func (s EquivocatingBlobSidecars) GetTestPeerCount() int {
 }
 
 func (s EquivocatingBlobSidecars) CanExecute(
-	spec *beacon_common.Spec,
-	beaconBlockContents *deneb.BlockContents,
+	spec map[string]interface{},
+	beaconBlockContents *apiv1deneb.BlockContents,
 ) (bool, string) {
 	// We require at least 1 blob to create the equivocating blob sidecars
 	if len(beaconBlockContents.Blobs) == 0 {
@@ -343,10 +356,10 @@ func (s EquivocatingBlobSidecars) CanExecute(
 }
 
 func (s EquivocatingBlobSidecars) Execute(
-	spec *beacon_common.Spec,
+	spec map[string]interface{},
 	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
@@ -426,8 +439,8 @@ func (s InvalidEquivocatingBlockAndBlobs) GetTestPeerCount() int {
 }
 
 func (s InvalidEquivocatingBlockAndBlobs) CanExecute(
-	spec *beacon_common.Spec,
-	beaconBlockContents *deneb.BlockContents,
+	spec map[string]interface{},
+	beaconBlockContents *apiv1deneb.BlockContents,
 ) (bool, string) {
 	// We require at least 1 blob to create the equivocating blob sidecars
 	if len(beaconBlockContents.Blobs) == 0 {
@@ -437,10 +450,10 @@ func (s InvalidEquivocatingBlockAndBlobs) CanExecute(
 }
 
 func (s InvalidEquivocatingBlockAndBlobs) Execute(
-	spec *beacon_common.Spec,
+	spec map[string]interface{},
 	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
@@ -502,8 +515,8 @@ func (s EquivocatingBlockHeaderInBlobs) Fields() map[string]interface{} {
 }
 
 func (s EquivocatingBlockHeaderInBlobs) CanExecute(
-	spec *beacon_common.Spec,
-	beaconBlockContents *deneb.BlockContents,
+	spec map[string]interface{},
+	beaconBlockContents *apiv1deneb.BlockContents,
 ) (bool, string) {
 	// We require at least 1 blob
 	if len(beaconBlockContents.Blobs) == 0 {
@@ -513,10 +526,10 @@ func (s EquivocatingBlockHeaderInBlobs) CanExecute(
 }
 
 func (s EquivocatingBlockHeaderInBlobs) Execute(
-	spec *beacon_common.Spec,
+	spec map[string]interface{},
 	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
@@ -579,18 +592,18 @@ func (s InvalidEquivocatingBlock) GetTestPeerCount() int {
 }
 
 func (s InvalidEquivocatingBlock) CanExecute(
-	spec *beacon_common.Spec,
-	beaconBlockContents *deneb.BlockContents,
+	spec map[string]interface{},
+	beaconBlockContents *apiv1deneb.BlockContents,
 ) (bool, string) {
 	// No requirements
 	return true, ""
 }
 
 func (s InvalidEquivocatingBlock) Execute(
-	spec *beacon_common.Spec,
+	spec map[string]interface{},
 	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
@@ -688,10 +701,10 @@ func FillSidecarWithRandomBlob(sidecar *deneb.BlobSidecar) error {
 }
 
 func (s ExtraBlobs) Execute(
-	spec *beacon_common.Spec,
+	spec map[string]interface{},
 	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
@@ -856,10 +869,10 @@ func (s ConflictingBlobs) GetConflictingBlobsCount() int {
 }
 
 func (s ConflictingBlobs) Execute(
-	spec *beacon_common.Spec,
+	spec map[string]interface{},
 	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
@@ -996,10 +1009,10 @@ func (s SwapBlobs) ModifyBlobs(blobSidecars []*deneb.BlobSidecar) ([]*deneb.Blob
 }
 
 func (s SwapBlobs) Execute(
-	spec *beacon_common.Spec,
+	spec map[string]interface{},
 	testPeers p2p.TestPeers,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain beacon_common.BLSDomain,
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,

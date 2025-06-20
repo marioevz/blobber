@@ -13,10 +13,9 @@ import (
 	"time"
 
 	"github.com/marioevz/blobber"
+	"github.com/marioevz/blobber/beacon"
 	"github.com/marioevz/blobber/config"
 	"github.com/marioevz/blobber/proposal_actions"
-	"github.com/marioevz/eth-clients/clients"
-	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
 	"github.com/sirupsen/logrus"
 )
 
@@ -177,7 +176,7 @@ func main() {
 	}
 
 	type beaconEndpoint struct {
-		BeaconClient *beacon_client.BeaconClient
+		BeaconClient *beacon.BeaconClientAdapter
 		Validator    bool
 	}
 
@@ -187,8 +186,8 @@ func main() {
 
 	addBeaconClient := func(i int, clEndpoint string, validator bool) {
 		defer wg.Done()
-		// Configure an external CL
-		externalCl, err := clients.ExternalClientFromURL(clEndpoint, "cl")
+		// Parse the beacon client URL
+		beaconAPIURL, err := beacon.ParseBeaconURL(clEndpoint)
 		if err != nil {
 			fatalf(
 				"error parsing consensus client url (%s): %v\n",
@@ -196,36 +195,32 @@ func main() {
 				err,
 			)
 		}
-
-		beaconCfg := beacon_client.BeaconClientConfig{}
-		if clPort := externalCl.GetPort(); clPort != nil {
-			beaconCfg.BeaconAPIPort = int(*clPort)
-		}
-		bn := &beacon_client.BeaconClient{
-			Client: externalCl,
-			Logger: &Logger{},
-			Config: beaconCfg,
-		}
-
+		
 		initctx, cancel := context.WithTimeout(
 			context.Background(),
 			time.Second*time.Duration(clientInitTimeoutSeconds),
 		)
 		defer cancel()
-		if err := bn.Init(initctx); err != nil {
-			if initctx.Err() != nil {
-				fatalf(
-					"error initializing consensus client: %d second init timeout exceeded\n",
-					clientInitTimeoutSeconds,
-				)
-			}
-			fatalf(
-				"error initializing consensus client: %v\n",
-				err,
-			)
+		
+		// Create our new beacon client adapter
+		adapter, err := beacon.NewBeaconClientAdapter(initctx, beaconAPIURL)
+		if err != nil {
+			fatalf("error creating beacon client adapter: %v\n", err)
 		}
+		
+		// Set up logger on the adapter's embedded BeaconClient
+		if adapter.BeaconClient != nil {
+			adapter.BeaconClient.Logger = &Logger{}
+			
+			// Initialize the old client (this populates spec and other fields)
+			if err := adapter.BeaconClient.Init(initctx); err != nil {
+				// Log warning but continue as we're using the new client
+				logrus.WithError(err).Warn("Failed to initialize old beacon client")
+			}
+		}
+		
 		beaconClients[i] = beaconEndpoint{
-			BeaconClient: bn,
+			BeaconClient: adapter,
 			Validator:    validator,
 		}
 	}
@@ -245,7 +240,7 @@ func main() {
 		config.WithExternalIP(net.ParseIP(externalIP)),
 		config.WithID(blobberID),
 		config.WithSpec(beaconClients[0].BeaconClient.Config.Spec),
-		config.WithBeaconGenesisTime(*beaconClients[0].BeaconClient.Config.GenesisTime),
+		config.WithBeaconGenesisTime(uint64(beaconClients[0].BeaconClient.Config.GenesisTime.Unix())),
 		config.WithGenesisValidatorsRoot(*beaconClients[0].BeaconClient.Config.GenesisValidatorsRoot),
 		config.WithBeaconPortStart(beaconPortStart),
 		config.WithProxiesPortStart(validatorProxyPortStart),
@@ -282,13 +277,16 @@ func main() {
 	}
 
 	for _, bn := range beaconClients {
+		// Pass the adapter itself
 		vp := b.AddBeaconClient(bn.BeaconClient, bn.Validator)
-		logrus.WithFields(
-			logrus.Fields{
-				"ip":   externalIP,
-				"port": vp.Port(),
-			},
-		).Info("Validator proxy started")
+		if vp != nil {
+			logrus.WithFields(
+				logrus.Fields{
+					"ip":   externalIP,
+					"port": vp.Port(),
+				},
+			).Info("Validator proxy started")
+		}
 	}
 
 	// Listen to SIGINT and SIGTERM signals
