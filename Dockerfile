@@ -10,11 +10,11 @@ COPY . .
 RUN go mod download
 
 # Build the application statically
-RUN cd cmd && GOOS=${GOOS} go build -o blobber.bin .
+RUN GOOS=${GOOS} go build -o blobber.bin ./cmd/blobber.go
 
 FROM debian:bullseye-slim
 
-COPY --from=builder /build/cmd/blobber.bin /blobber.bin
+COPY --from=builder /build/blobber.bin /blobber.bin
 
 RUN apt-get update && apt-get install -y curl
 

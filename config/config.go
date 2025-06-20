@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"runtime"
 	"sync"
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
@@ -45,11 +46,11 @@ func (cfg *Config) Apply(opts ...Option) error {
 
 type Option struct {
 	apply       func(cfg *Config) error
-	description string
+	Description string
 }
 
 func (o Option) MarshalText() ([]byte, error) {
-	return []byte(o.description), nil
+	return []byte(o.Description), nil
 }
 
 func WithID(id uint64) Option {
@@ -61,7 +62,7 @@ func WithID(id uint64) Option {
 			cfg.TestP2P.InstanceID = id
 			return nil
 		},
-		description: fmt.Sprintf("WithID(%d)", id),
+		Description: fmt.Sprintf("WithID(%d)", id),
 	}
 }
 
@@ -73,7 +74,7 @@ func WithHost(host string) Option {
 			cfg.Host = host
 			return nil
 		},
-		description: fmt.Sprintf("WithHost(%s)", host),
+		Description: fmt.Sprintf("WithHost(%s)", host),
 	}
 }
 
@@ -86,7 +87,7 @@ func WithExternalIP(ip net.IP) Option {
 			cfg.TestP2P.ExternalIP = ip
 			return nil
 		},
-		description: fmt.Sprintf("WithExternalIP(%s)", ip),
+		Description: fmt.Sprintf("WithExternalIP(%s)", ip),
 	}
 }
 
@@ -98,7 +99,7 @@ func WithPort(port int) Option {
 			cfg.Port = port
 			return nil
 		},
-		description: fmt.Sprintf("WithPort(%d)", port),
+		Description: fmt.Sprintf("WithPort(%d)", port),
 	}
 }
 
@@ -110,7 +111,7 @@ func WithBeaconPortStart(port int) Option {
 			cfg.TestP2P.BeaconPortStart = int64(port)
 			return nil
 		},
-		description: fmt.Sprintf("WithBeaconPortStart(%d)", port),
+		Description: fmt.Sprintf("WithBeaconPortStart(%d)", port),
 	}
 }
 
@@ -124,7 +125,7 @@ func WithLogLevel(level string) Option {
 			logrus.SetLevel(lvl)
 			return nil
 		},
-		description: fmt.Sprintf("WithLogLevel(%s)", level),
+		Description: fmt.Sprintf("WithLogLevel(%s)", level),
 	}
 }
 
@@ -136,7 +137,7 @@ func WithValidatorLoadTimeoutSeconds(timeout int) Option {
 			cfg.ValidatorLoadTimeoutSeconds = timeout
 			return nil
 		},
-		description: fmt.Sprintf("WithValidatorLoadTimeoutSeconds(%d)", timeout),
+		Description: fmt.Sprintf("WithValidatorLoadTimeoutSeconds(%d)", timeout),
 	}
 }
 
@@ -148,7 +149,7 @@ func WithMaxDevP2PSessionReuses(reuse int) Option {
 			cfg.MaxDevP2PSessionReuses = reuse
 			return nil
 		},
-		description: fmt.Sprintf("WithMaxDevP2PSessionReuses(%d)", reuse),
+		Description: fmt.Sprintf("WithMaxDevP2PSessionReuses(%d)", reuse),
 	}
 }
 
@@ -160,7 +161,7 @@ func WithProxiesPortStart(portStart int) Option {
 			cfg.ProxiesPortStart = portStart
 			return nil
 		},
-		description: fmt.Sprintf("WithProxiesPortStart(%d)", portStart),
+		Description: fmt.Sprintf("WithProxiesPortStart(%d)", portStart),
 	}
 }
 
@@ -172,7 +173,7 @@ func WithSpec(spec map[string]interface{}) Option {
 			cfg.Spec = spec
 			return nil
 		},
-		description: "WithSpec", // TODO: actually format the spec
+		Description: "WithSpec", // TODO: actually format the spec
 	}
 }
 
@@ -184,7 +185,7 @@ func WithBeaconGenesisTime(t uint64) Option {
 			cfg.BeaconGenesisTime = t
 			return nil
 		},
-		description: fmt.Sprintf("WithBeaconGenesisTime(%d)", t),
+		Description: fmt.Sprintf("WithBeaconGenesisTime(%d)", t),
 	}
 }
 
@@ -196,7 +197,7 @@ func WithGenesisValidatorsRoot(t phase0.Root) Option {
 			cfg.GenesisValidatorsRoot = t
 			return nil
 		},
-		description: fmt.Sprintf("WithGenesisValidatorsRoot(0x%x)", t),
+		Description: fmt.Sprintf("WithGenesisValidatorsRoot(0x%x)", t),
 	}
 }
 
@@ -208,7 +209,7 @@ func WithValidatorKeys(vk map[phase0.ValidatorIndex]*keys.ValidatorKey) Option {
 			cfg.ValidatorKeys = vk
 			return nil
 		},
-		description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
+		Description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
 	}
 }
 
@@ -220,7 +221,7 @@ func WithValidatorKeysList(vk []*keys.ValidatorKey) Option {
 			cfg.ValidatorKeysList = vk
 			return nil
 		},
-		description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
+		Description: fmt.Sprintf("WithValidatorKeys(%d)", len(vk)),
 	}
 }
 
@@ -236,7 +237,7 @@ func WithValidatorKeysListFromFile(path string) Option {
 			cfg.ValidatorKeysList = vk
 			return nil
 		},
-		description: fmt.Sprintf("WithValidatorKeysListFromFile(%s)", path),
+		Description: fmt.Sprintf("WithValidatorKeysListFromFile(%s)", path),
 	}
 }
 
@@ -252,7 +253,7 @@ func WithValidatorKeysListFromFolder(path string) Option {
 			cfg.ValidatorKeysList = vk
 			return nil
 		},
-		description: fmt.Sprintf("WithValidatorKeysListFromFolder(%s)", path),
+		Description: fmt.Sprintf("WithValidatorKeysListFromFolder(%s)", path),
 	}
 }
 
@@ -264,11 +265,22 @@ func WithProposalAction(action proposal_actions.ProposalAction) Option {
 			cfg.ProposalAction = action
 			return nil
 		},
-		description: fmt.Sprintf("WithProposalAction(%s)", action),
+		Description: fmt.Sprintf("WithProposalAction(%s)", action),
 	}
 }
 
 func WithProposalActionFrequency(freq uint64) Option {
+	// This function should not be called anymore!
+	fmt.Printf("WARNING: WithProposalActionFrequency called with freq=%d\n", freq)
+	fmt.Println("Stack trace:")
+	for i := 1; i < 10; i++ {
+		pc, file, line, ok := runtime.Caller(i)
+		if !ok {
+			break
+		}
+		fmt.Printf("  %s:%d %s\n", file, line, runtime.FuncForPC(pc).Name())
+	}
+	
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()
@@ -282,7 +294,7 @@ func WithProposalActionFrequency(freq uint64) Option {
 			cfg.ProposalAction.SetFrequency(freq)
 			return nil
 		},
-		description: fmt.Sprintf("WithProposalActionFrequency(%d)", freq),
+		Description: fmt.Sprintf("WithProposalActionFrequency(%d)", freq),
 	}
 }
 
@@ -294,6 +306,6 @@ func WithAlwaysErrorValidatorResponse() Option {
 			cfg.AlwaysErrorValidatorResponse = true
 			return nil
 		},
-		description: "WithAlwaysErrorValidatorResponse()",
+		Description: "WithAlwaysErrorValidatorResponse()",
 	}
 }

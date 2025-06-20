@@ -36,6 +36,14 @@ func (i *arrayFlags) Set(value string) error {
 	return nil
 }
 
+func mustGetwd() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "unknown"
+	}
+	return wd
+}
+
 func fatalf(format string, args ...interface{}) {
 	fatal(fmt.Errorf(format, args...))
 }
@@ -47,6 +55,12 @@ func fatal(err error) {
 }
 
 func main() {
+	// Log startup
+	fmt.Println("=== BLOBBER STARTING ===")
+	fmt.Printf("Version: %s\n", "refactor-v5")
+	fmt.Printf("Args: %v\n", os.Args)
+	fmt.Printf("Working directory: %s\n", mustGetwd())
+	
 	var (
 		clEndpoints                       arrayFlags
 		nonValidatingClEndpoints          arrayFlags
@@ -161,10 +175,18 @@ func main() {
 		"Enable unsafe mode, only use this if you know what you're doing and never attempt to run this tool on mainnet.",
 	)
 
+	fmt.Println("=== PARSING FLAGS ===")
 	err := flag.CommandLine.Parse(os.Args[1:])
 	if err != nil {
 		panic(err)
 	}
+
+	fmt.Println("=== FLAGS PARSED ===")
+	fmt.Printf("proposalActionJson: '%s'\n", proposalActionJson)
+	fmt.Printf("proposalActionFrequency: %d\n", proposalActionFrequency)
+	fmt.Printf("clEndpoints: %v\n", clEndpoints)
+	fmt.Printf("externalIP: %s\n", externalIP)
+	fmt.Printf("unsafeMode: %v\n", unsafeMode)
 
 	if !unsafeMode {
 		fmt.Printf("WARNING: Some of the actions performed by this tool are unsafe and will get a validator SLASHED. Never run this tool on mainnet, and only run in test networks. If you know what you're doing, use the --enable-unsafe-mode flag to ignore this warning an proceed.\n\n")
@@ -260,6 +282,11 @@ func main() {
 	}
 
 	// Debug output - print all args
+	fmt.Println("=== CONFIGURING PROPOSAL ACTION ===")
+	fmt.Printf("Raw args again: %v\n", os.Args)
+	fmt.Printf("proposalActionJson value: '%s' (len=%d)\n", proposalActionJson, len(proposalActionJson))
+	fmt.Printf("proposalActionFrequency value: %d\n", proposalActionFrequency)
+	
 	logrus.Infof("All args: %v", os.Args)
 	logrus.Infof("proposalActionJson: '%s' (len=%d)", proposalActionJson, len(proposalActionJson))
 	logrus.Infof("proposalActionFrequency: %d", proposalActionFrequency)
@@ -267,6 +294,7 @@ func main() {
 	// Handle proposal action and frequency together
 	// Trim any whitespace that might have been introduced
 	proposalActionJson = strings.TrimSpace(proposalActionJson)
+	fmt.Printf("After trim, proposalActionJson: '%s' (len=%d)\n", proposalActionJson, len(proposalActionJson))
 	
 	if proposalActionJson != "" && proposalActionJson != "{}" {
 		logrus.Infof("Parsing proposal action JSON...")
@@ -293,10 +321,19 @@ func main() {
 		blobberOpts = append(blobberOpts, config.WithValidatorLoadTimeoutSeconds(stateValidatorFetchTimeoutSeconds))
 	}
 
+	fmt.Println("=== CREATING BLOBBER ===")
+	fmt.Printf("Number of options: %d\n", len(blobberOpts))
+	for i, opt := range blobberOpts {
+		fmt.Printf("Option %d: %s\n", i, opt.Description)
+	}
+
 	b, err := blobber.NewBlobber(context.Background(), blobberOpts...)
 	if err != nil {
+		fmt.Printf("ERROR: Failed to create blobber\n")
+		fmt.Printf("Error details: %v\n", err)
 		fatalf("error creating blobber: %v\n", err)
 	}
+	fmt.Println("=== BLOBBER CREATED SUCCESSFULLY ===")
 
 	for _, bn := range beaconClients {
 		// Pass the adapter itself
