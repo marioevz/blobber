@@ -235,6 +235,7 @@ func main() {
 	}
 	wg.Wait()
 
+	// Build base options first
 	blobberOpts := []config.Option{
 		config.WithHost(hostIP),
 		config.WithExternalIP(net.ParseIP(externalIP)),
@@ -258,16 +259,31 @@ func main() {
 		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFolder(validatorKeyFolderPath))
 	}
 
+	// Debug output - print all args
+	logrus.Infof("All args: %v", os.Args)
+	logrus.Infof("proposalActionJson: '%s' (len=%d)", proposalActionJson, len(proposalActionJson))
+	logrus.Infof("proposalActionFrequency: %d", proposalActionFrequency)
+	
+	// Handle proposal action and frequency together
 	if proposalActionJson != "" {
+		logrus.Infof("Parsing proposal action JSON...")
 		proposalAction, err := proposal_actions.UnmarshallProposalAction([]byte(proposalActionJson))
 		if err != nil {
-			fatalf("error parsing proposal action: %v\n", err)
+			fatalf("error parsing proposal action JSON '%s': %v\n", proposalActionJson, err)
 		}
-		blobberOpts = append(blobberOpts, config.WithProposalAction(proposalAction))
-		// Only set frequency after the proposal action is set
+		logrus.Infof("Successfully parsed proposal action: %v", proposalAction)
+		
+		// Set the frequency on the proposal action before adding it
 		if proposalActionFrequency > 0 {
-			blobberOpts = append(blobberOpts, config.WithProposalActionFrequency(uint64(proposalActionFrequency)))
+			logrus.Infof("Setting frequency %d on proposal action before adding to options", proposalActionFrequency)
+			proposalAction.SetFrequency(uint64(proposalActionFrequency))
 		}
+		
+		// Now add the proposal action with frequency already set
+		blobberOpts = append(blobberOpts, config.WithProposalAction(proposalAction))
+	} else if proposalActionFrequency != 1 {
+		// If no proposal action but frequency is set to non-default value, error out
+		fatalf("proposal-action-frequency=%d specified but no proposal-action provided\n", proposalActionFrequency)
 	}
 
 	if stateValidatorFetchTimeoutSeconds > 0 {

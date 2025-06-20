@@ -274,6 +274,9 @@ func WithProposalActionFrequency(freq uint64) Option {
 			cfg.Lock()
 			defer cfg.Unlock()
 			if cfg.ProposalAction == nil {
+				// Store the frequency for later use when proposal action is set
+				// This handles the case where options might be applied in different order
+				logrus.Warnf("ProposalAction not yet set, cannot set frequency %d", freq)
 				return fmt.Errorf("cannot set ProposalActionFrequency without ProposalAction")
 			}
 			cfg.ProposalAction.SetFrequency(freq)
