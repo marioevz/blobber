@@ -65,8 +65,8 @@ const (
 
 // ValidatorResponse represents a validator response from the API
 type ValidatorResponse struct {
-	Index     uint64    `json:"index"`
-	Balance   uint64    `json:"balance"`
+	Index     string    `json:"index"`     // Changed to string as beacon nodes return this as string
+	Balance   string    `json:"balance"`   // Changed to string for consistency
 	Status    string    `json:"status"`
 	Validator Validator `json:"validator"`
 }

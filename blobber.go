@@ -194,11 +194,13 @@ func (b *Blobber) AddBeaconClient(cl *beacon.BeaconClientAdapter, validatorProxy
 	}
 	validatorResponses, err := b.loadStateValidators(b.ctx, cl, api.StateHead, nil, nil)
 	if err != nil {
+		logrus.WithError(err).Error("Failed to load validators from beacon node")
+		fmt.Fprintf(os.Stderr, "ERROR: Failed to load validators: %v\n", err)
 		panic(err)
 	}
 	logrus.WithFields(
 		logrus.Fields{
-			"state_validator_count": validatorResponses,
+			"state_validator_count": len(validatorResponses),
 			"keyed_validator_count": len(b.ValidatorKeys),
 		},
 	).Info("Loaded validators from beacon node")
@@ -243,7 +245,12 @@ func (b *Blobber) loadStateValidators(
 	}
 
 	for _, validatorResponse := range validatorResponses {
-		validatorIndex := validatorResponse.Index
+		// Parse string index to uint64
+		var validatorIndex uint64
+		if _, err := fmt.Sscanf(validatorResponse.Index, "%d", &validatorIndex); err != nil {
+			logrus.WithError(err).WithField("index", validatorResponse.Index).Error("Failed to parse validator index")
+			continue
+		}
 		validatorPubkey := validatorResponse.Validator.Pubkey
 		for _, key := range b.ValidatorKeysList {
 			if bytes.Equal(key.PubKeyToBytes(), validatorPubkey[:]) {

@@ -76,5 +76,11 @@ func GetStateValidators(
 		return nil, errors.Wrap(err, "failed to decode response")
 	}
 
+	// Log the number of validators returned
+	if len(result.Data) > 0 {
+		// Log a sample validator for debugging
+		fmt.Printf("DEBUG: Got %d validators, first validator index: %s\n", len(result.Data), result.Data[0].Index)
+	}
+
 	return result.Data, nil
 }

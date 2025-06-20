@@ -23,7 +23,7 @@ func init() {
 	// Use stderr to ensure this is visible
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "########################################")
-	fmt.Fprintln(os.Stderr, "# BLOBBER INIT (refactor-v6-debug)    #")
+	fmt.Fprintln(os.Stderr, "# BLOBBER INIT (refactor-v7-json-fix) #")
 	fmt.Fprintln(os.Stderr, "########################################")
 	fmt.Fprintf(os.Stderr, "# Binary: %s\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "# Args: %v\n", os.Args[1:])
@@ -68,8 +68,8 @@ func fatal(err error) {
 
 func main() {
 	// Log startup - this MUST appear if the new binary is being used
-	fmt.Fprintf(os.Stderr, "=== BLOBBER STARTING (v6-debug) ===\n")
-	fmt.Fprintf(os.Stderr, "Version: refactor-v6-debug\n")
+	fmt.Fprintf(os.Stderr, "=== BLOBBER STARTING (v7-json-fix) ===\n")
+	fmt.Fprintf(os.Stderr, "Version: refactor-v7-json-fix\n")
 	fmt.Fprintf(os.Stderr, "Args (%d): %v\n", len(os.Args), os.Args)
 	fmt.Fprintf(os.Stderr, "Working directory: %s\n", mustGetwd())
 	

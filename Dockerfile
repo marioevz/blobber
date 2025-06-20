@@ -10,7 +10,7 @@ COPY . .
 RUN go mod download
 
 # Build the application statically
-RUN echo "Building blobber with debug logging..." && \
+RUN echo "Building blobber v7 with JSON fix..." && \
     GOOS=${GOOS} go build -o blobber.bin ./cmd/blobber.go && \
     echo "Build complete, binary size:" && \
     ls -la blobber.bin
