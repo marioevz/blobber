@@ -2,6 +2,7 @@ package beacon
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
@@ -37,6 +38,6 @@ func (b *BeaconClient) GetAddress() string {
 // ENR returns the node's ENR
 func (b *BeaconClient) ENR(ctx context.Context) (string, error) {
 	// This would typically make an API call to get the ENR
-	// For now, return empty string
-	return "", nil
+	// For now, return an error indicating ENR is not implemented
+	return "", fmt.Errorf("ENR retrieval not implemented for legacy client")
 }

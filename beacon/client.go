@@ -167,6 +167,16 @@ func (c *Client) BeaconBlock(ctx context.Context, blockID string) (*phase0.Signe
 	return nil, fmt.Errorf("unknown block version")
 }
 
+// GetNodeENR retrieves the node's ENR
+// Note: The standard beacon API doesn't directly expose the node's own ENR
+// This is a limitation we need to work around
+func (c *Client) GetNodeENR(ctx context.Context) (string, error) {
+	// The beacon API doesn't have a standard endpoint for getting the node's own ENR
+	// Some implementations might expose it through custom endpoints
+	// For now, we return an error indicating this is not supported
+	return "", fmt.Errorf("ENR retrieval not supported - beacon node API does not expose node's own ENR")
+}
+
 // NodeSyncing checks if the node is syncing
 func (c *Client) NodeSyncing(ctx context.Context) (bool, error) {
 	nodeSyncingProvider, ok := c.client.(eth2client.NodeSyncingProvider)

@@ -282,9 +282,24 @@ func (a *BeaconClientAdapter) matchesStatusFilter(validator *apiv1.Validator, st
 
 // ENR returns the node's ENR (Ethereum Node Record)
 func (a *BeaconClientAdapter) ENR(ctx context.Context) (string, error) {
-	// Use the embedded BeaconClient's ENR method if available
-	if a.BeaconClient != nil {
-		return a.BeaconClient.ENR(ctx)
+	// Try to get ENR from the node peers endpoint
+	if a.client != nil {
+		enr, err := a.client.GetNodeENR(ctx)
+		if err != nil {
+			// Log the error but don't fail immediately
+			logrus.WithError(err).Debug("Failed to get ENR from node peers endpoint")
+		} else if enr != "" {
+			return enr, nil
+		}
 	}
-	return "", fmt.Errorf("ENR not available")
+	
+	// Fall back to embedded BeaconClient's ENR method if available
+	if a.BeaconClient != nil {
+		enr, err := a.BeaconClient.ENR(ctx)
+		if err != nil {
+			return "", fmt.Errorf("failed to get ENR: %w", err)
+		}
+		return enr, nil
+	}
+	return "", fmt.Errorf("ENR not available - beacon node may not support P2P")
 }

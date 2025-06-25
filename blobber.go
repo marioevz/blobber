@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,6 @@ import (
 	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
 	apiv1electra "github.com/attestantio/go-eth2-client/api/v1/electra"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
-	"github.com/gorilla/mux"
 	"github.com/marioevz/blobber/beacon"
 	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/config"
@@ -362,25 +362,47 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 
 	testPeerCount := proposalAction.GetTestPeerCount()
 
-	// Peer with the beacon nodes and broadcast the block and blobs
-	testPeers, err := b.GetTestPeer(b.ctx, testPeerCount)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to create p2p")
-	} else if len(testPeers) != testPeerCount {
-		return false, fmt.Errorf("failed to create p2p, expected %d, got %d", testPeerCount, len(testPeers))
-	}
-	for i, testPeer := range testPeers {
-		logrus.WithFields(logrus.Fields{
-			"index":   i,
-			"peer_id": testPeer.Host.ID().String(),
-		}).Debug("Created test p2p")
-	}
+	// Try to create P2P peers if needed
+	var testPeers p2p.TestPeers
+	if testPeerCount > 0 {
+		// Peer with the beacon nodes and broadcast the block and blobs
+		var err error
+		testPeers, err = b.GetTestPeer(b.ctx, testPeerCount)
+		if err != nil {
+			logrus.WithError(err).Warn("Failed to create P2P test peers, continuing without P2P support")
+			// Create empty test peers array to continue
+			testPeers = make(p2p.TestPeers, 0)
+		} else if len(testPeers) != testPeerCount {
+			logrus.WithFields(logrus.Fields{
+				"expected": testPeerCount,
+				"got":      len(testPeers),
+			}).Warn("Did not get expected number of test peers")
+		} else {
+			for i, testPeer := range testPeers {
+				logrus.WithFields(logrus.Fields{
+					"index":   i,
+					"peer_id": testPeer.Host.ID().String(),
+				}).Debug("Created test p2p")
+			}
 
-	// Connect to the beacon nodes
-	for i, cl := range b.cls {
-		testPeer := testPeers[i%len(testPeers)]
-		if err := testPeer.Connect(b.ctx, cl); err != nil {
-			return false, errors.Wrap(err, "failed to connect to beacon node")
+			// Connect to the beacon nodes
+			connectedCount := 0
+			for i, cl := range b.cls {
+				testPeer := testPeers[i%len(testPeers)]
+				if err := testPeer.Connect(b.ctx, cl); err != nil {
+					// Log the error but continue with other connections
+					logrus.WithError(err).WithFields(logrus.Fields{
+						"beacon_index": i,
+						"test_peer_index": i % len(testPeers),
+					}).Warn("Failed to connect to beacon node via P2P")
+				} else {
+					connectedCount++
+				}
+			}
+			logrus.WithFields(logrus.Fields{
+				"connected":    connectedCount,
+				"total_beacons": len(b.cls),
+			}).Info("P2P connection summary")
 		}
 	}
 
@@ -418,10 +440,19 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 
 func (b *Blobber) genValidatorBlockHandler(cl *beacon.BeaconClientAdapter, id int, version int) validator_proxy.ResponseCallback {
 	return func(request *http.Request, response []byte) (bool, error) {
-		var slot phase0.Slot
-		if err := slot.UnmarshalJSON([]byte(mux.Vars(request)["slot"])); err != nil {
-			return false, errors.Wrap(err, "failed to unmarshal slot")
+		// Extract slot from URL path
+		// URL format: /eth/v2/validator/blocks/{slot} or /eth/v3/validator/blocks/{slot}
+		pathParts := strings.Split(request.URL.Path, "/")
+		if len(pathParts) < 6 {
+			return false, fmt.Errorf("invalid URL path: %s", request.URL.Path)
 		}
+		slotStr := pathParts[len(pathParts)-1] // Last part should be the slot
+		
+		slotUint, err := strconv.ParseUint(slotStr, 10, 64)
+		if err != nil {
+			return false, errors.Wrap(err, "failed to parse slot from URL")
+		}
+		slot := phase0.Slot(slotUint)
 		blockBlobResponse, err := ParseResponse(response)
 		if err != nil || blockBlobResponse == nil {
 			logrus.WithFields(logrus.Fields{
