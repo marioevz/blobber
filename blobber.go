@@ -15,7 +15,6 @@ import (
 	apiv1electra "github.com/attestantio/go-eth2-client/api/v1/electra"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/gorilla/mux"
-	"github.com/marioevz/blobber/api"
 	"github.com/marioevz/blobber/beacon"
 	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/config"
@@ -192,7 +191,7 @@ func (b *Blobber) AddBeaconClient(cl *beacon.BeaconClientAdapter, validatorProxy
 	if b.ValidatorKeys == nil {
 		b.ValidatorKeys = make(map[phase0.ValidatorIndex]*keys.ValidatorKey)
 	}
-	validatorCount, err := b.loadStateValidators(b.ctx, cl, api.StateHead, nil, nil)
+	validatorCount, err := b.loadStateValidators(b.ctx, cl, beacon.StateId("head"), nil, nil)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to load validators from beacon node")
 		fmt.Fprintf(os.Stderr, "ERROR: Failed to load validators: %v\n", err)
@@ -211,9 +210,9 @@ func (b *Blobber) AddBeaconClient(cl *beacon.BeaconClientAdapter, validatorProxy
 func (b *Blobber) loadStateValidators(
 	parentCtx context.Context,
 	bn *beacon.BeaconClientAdapter,
-	stateId api.StateId,
-	validatorIds []api.ValidatorId,
-	statusFilter []api.ValidatorStatus,
+	stateId beacon.StateId,
+	validatorIds []beacon.ValidatorId,
+	statusFilter []beacon.ValidatorStatus,
 ) (int, error) {
 	ctx, cancel := context.WithTimeout(
 		parentCtx,
@@ -221,40 +220,24 @@ func (b *Blobber) loadStateValidators(
 	)
 	defer cancel()
 
-	// Use the GetStateValidators function from api package
-	// Convert beacon types to api types
-	apiStateId := api.StateId(stateId)
-	apiValidatorIds := make([]api.ValidatorId, len(validatorIds))
-	for i, id := range validatorIds {
-		apiValidatorIds[i] = api.ValidatorId(id)
-	}
-	apiStatusFilter := make([]api.ValidatorStatus, len(statusFilter))
-	for i, status := range statusFilter {
-		apiStatusFilter[i] = api.ValidatorStatus(status)
-	}
-
-	validatorResponses, err := api.GetStateValidators(
+	// Use the beacon adapter's StateValidators method which already handles proper types
+	validatorResponses, err := bn.StateValidators(
 		ctx,
-		bn,
-		apiStateId,
-		apiValidatorIds,
-		apiStatusFilter,
+		stateId,
+		validatorIds,
+		statusFilter,
 	)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to get validators")
 	}
 
 	for _, validatorResponse := range validatorResponses {
-		// Parse string index to uint64
-		var validatorIndex uint64
-		if _, err := fmt.Sscanf(validatorResponse.Index, "%d", &validatorIndex); err != nil {
-			logrus.WithError(err).WithField("index", validatorResponse.Index).Error("Failed to parse validator index")
-			continue
-		}
-		validatorPubkey := validatorResponse.Validator.Pubkey
+		// Index is already a phase0.ValidatorIndex
+		validatorIndex := validatorResponse.Index
+		validatorPubkey := validatorResponse.Validator.PublicKey
 		for _, key := range b.ValidatorKeysList {
 			if bytes.Equal(key.PubKeyToBytes(), validatorPubkey[:]) {
-				b.ValidatorKeys[phase0.ValidatorIndex(validatorIndex)] = key
+				b.ValidatorKeys[validatorIndex] = key
 				break
 			}
 		}

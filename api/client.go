@@ -73,6 +73,8 @@ func GetStateValidators(
 	// Parse response
 	var result StateValidatorsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		// Log raw response for debugging
+		fmt.Printf("DEBUG: Failed to decode validators response: %v\n", err)
 		return nil, errors.Wrap(err, "failed to decode response")
 	}
 

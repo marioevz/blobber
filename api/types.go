@@ -1,5 +1,65 @@
 package api
 
+import (
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// HexBytes is a byte array that marshals/unmarshals as a hex string in JSON
+type HexBytes []byte
+
+// UnmarshalJSON implements json.Unmarshaler
+func (h *HexBytes) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	
+	// Remove 0x prefix if present
+	str = strings.TrimPrefix(str, "0x")
+	
+	// Decode hex string
+	decoded, err := hex.DecodeString(str)
+	if err != nil {
+		return fmt.Errorf("invalid hex string: %w", err)
+	}
+	
+	*h = decoded
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler
+func (h HexBytes) MarshalJSON() ([]byte, error) {
+	return json.Marshal("0x" + hex.EncodeToString(h))
+}
+
+// Bytes returns the byte slice
+func (h HexBytes) Bytes() []byte {
+	return []byte(h)
+}
+
+// ToArray48 converts HexBytes to a [48]byte array (for pubkeys)
+func (h HexBytes) ToArray48() ([48]byte, error) {
+	var arr [48]byte
+	if len(h) != 48 {
+		return arr, fmt.Errorf("expected 48 bytes, got %d", len(h))
+	}
+	copy(arr[:], h)
+	return arr, nil
+}
+
+// ToArray32 converts HexBytes to a [32]byte array (for withdrawal credentials)
+func (h HexBytes) ToArray32() ([32]byte, error) {
+	var arr [32]byte
+	if len(h) != 32 {
+		return arr, fmt.Errorf("expected 32 bytes, got %d", len(h))
+	}
+	copy(arr[:], h)
+	return arr, nil
+}
+
 // StateId represents a state identifier
 type StateId string
 
@@ -73,12 +133,12 @@ type ValidatorResponse struct {
 
 // Validator represents validator data
 type Validator struct {
-	Pubkey                     [48]byte `json:"pubkey"`
-	WithdrawalCredentials      [32]byte `json:"withdrawal_credentials"`
-	EffectiveBalance           uint64   `json:"effective_balance"`
+	Pubkey                     HexBytes `json:"pubkey"`
+	WithdrawalCredentials      HexBytes `json:"withdrawal_credentials"`
+	EffectiveBalance           string   `json:"effective_balance"`
 	Slashed                    bool     `json:"slashed"`
-	ActivationEligibilityEpoch uint64   `json:"activation_eligibility_epoch"`
-	ActivationEpoch            uint64   `json:"activation_epoch"`
-	ExitEpoch                  uint64   `json:"exit_epoch"`
-	WithdrawableEpoch          uint64   `json:"withdrawable_epoch"`
+	ActivationEligibilityEpoch string   `json:"activation_eligibility_epoch"`
+	ActivationEpoch            string   `json:"activation_epoch"`
+	ExitEpoch                  string   `json:"exit_epoch"`
+	WithdrawableEpoch          string   `json:"withdrawable_epoch"`
 }
