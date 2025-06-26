@@ -36,17 +36,17 @@ func (bcp *BeaconClientPeer) GetPeerAddrInfo(ctx context.Context) (*peer.AddrInf
 	if err != nil {
 		return nil, errors.Wrap(err, "could not get ENR from beacon node")
 	}
-	
+
 	// Check if ENR is empty or invalid
 	if enr == "" {
 		return nil, errors.New("ENR is empty - beacon node may not support P2P or ENR endpoint")
 	}
-	
+
 	// ENR should start with "enr:" prefix
 	if len(enr) < 4 || enr[:4] != "enr:" {
 		return nil, fmt.Errorf("invalid ENR format: missing 'enr:' prefix (got: %q) - beacon node returned invalid ENR", enr)
 	}
-	
+
 	node, err := enode.Parse(enode.ValidSchemes, enr)
 	if err != nil {
 		return nil, errors.Wrapf(err, "could not parse ENR: %q", enr)

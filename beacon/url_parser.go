@@ -11,7 +11,7 @@ func ParseBeaconURL(rawURL string) (string, error) {
 	if rawURL == "" {
 		return "", fmt.Errorf("empty URL")
 	}
-	
+
 	// Handle the case where no scheme is provided
 	if !strings.Contains(rawURL, "://") {
 		rawURL = "http://" + rawURL

@@ -140,20 +140,28 @@ func (v *ValidatorProxy) proxyHandler(p *httputil.ReverseProxy, callback Respons
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		// Forward the headers from the destination response to our proxy response.
-		for k, vv := range proxyRes.Header {
-			for _, v := range vv {
-				w.Header().Add(k, v)
-			}
-		}
-
-		// We optionally Spoof the response as desired.
+		// We need to read the response body first before setting headers
 		modifiedResp, err := io.ReadAll(proxyRes.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		proxyRes.Body.Close()
+		
+		// Check if the beacon node returned an error
+		if proxyRes.StatusCode >= 400 {
+			// Forward the error response directly
+			for k, vv := range proxyRes.Header {
+				for _, v := range vv {
+					w.Header().Add(k, v)
+				}
+			}
+			w.WriteHeader(proxyRes.StatusCode)
+			w.Write(modifiedResp)
+			return
+		}
 
+		// Execute the callback only for successful responses
 		if override, err := callback(r, modifiedResp); err != nil {
 			logrus.WithError(err).Error("Could not execute callback, returning response to validator client")
 			if v.alwaysError {
@@ -169,20 +177,18 @@ func (v *ValidatorProxy) proxyHandler(p *httputil.ReverseProxy, callback Respons
 			return
 		}
 
-		if err = proxyRes.Body.Close(); err != nil {
-			logrus.WithError(err).Error("Could not do client proxy")
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		// Forward the headers from the successful response
+		for k, vv := range proxyRes.Header {
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
 		}
-
-		// Set the modified response as the proxy response body.
-		proxyRes.Body = io.NopCloser(bytes.NewBuffer(modifiedResp))
-
-		// Pipe the proxy response to the original caller.
-		if _, err = io.Copy(w, proxyRes.Body); err != nil {
-			logrus.WithError(err).Error("Could not copy proxy request body")
-			return
-		}
+		
+		// Write the status code (default 200 if not set)
+		w.WriteHeader(proxyRes.StatusCode)
+		
+		// Write the response body
+		w.Write(modifiedResp)
 	}
 }
 

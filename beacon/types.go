@@ -84,17 +84,17 @@ func ParseValidatorId(s string) (ValidatorId, error) {
 type ValidatorStatus string
 
 const (
-	ValidatorStatusUnknown              ValidatorStatus = "unknown"
-	ValidatorStatusPendingInitialized   ValidatorStatus = "pending_initialized"
-	ValidatorStatusPendingQueued        ValidatorStatus = "pending_queued"
-	ValidatorStatusActiveOngoing        ValidatorStatus = "active_ongoing"
-	ValidatorStatusActiveExiting        ValidatorStatus = "active_exiting"
-	ValidatorStatusActiveSlashed        ValidatorStatus = "active_slashed"
-	ValidatorStatusExitedUnslashed      ValidatorStatus = "exited_unslashed"
-	ValidatorStatusExitedSlashed        ValidatorStatus = "exited_slashed"
-	ValidatorStatusWithdrawalPossible   ValidatorStatus = "withdrawal_possible"
-	ValidatorStatusWithdrawalDone       ValidatorStatus = "withdrawal_done"
-	
+	ValidatorStatusUnknown            ValidatorStatus = "unknown"
+	ValidatorStatusPendingInitialized ValidatorStatus = "pending_initialized"
+	ValidatorStatusPendingQueued      ValidatorStatus = "pending_queued"
+	ValidatorStatusActiveOngoing      ValidatorStatus = "active_ongoing"
+	ValidatorStatusActiveExiting      ValidatorStatus = "active_exiting"
+	ValidatorStatusActiveSlashed      ValidatorStatus = "active_slashed"
+	ValidatorStatusExitedUnslashed    ValidatorStatus = "exited_unslashed"
+	ValidatorStatusExitedSlashed      ValidatorStatus = "exited_slashed"
+	ValidatorStatusWithdrawalPossible ValidatorStatus = "withdrawal_possible"
+	ValidatorStatusWithdrawalDone     ValidatorStatus = "withdrawal_done"
+
 	// Composite statuses
 	ValidatorStatusActive     ValidatorStatus = "active"
 	ValidatorStatusPending    ValidatorStatus = "pending"
@@ -104,14 +104,14 @@ const (
 
 // Validator represents a validator
 type Validator struct {
-	PublicKey                  phase0.BLSPubKey          `json:"pubkey"`
-	WithdrawalCredentials      phase0.Hash32             `json:"withdrawal_credentials"`
-	EffectiveBalance           phase0.Gwei               `json:"effective_balance,string"`
-	Slashed                    bool                      `json:"slashed"`
-	ActivationEligibilityEpoch phase0.Epoch              `json:"activation_eligibility_epoch,string"`
-	ActivationEpoch            phase0.Epoch              `json:"activation_epoch,string"`
-	ExitEpoch                  phase0.Epoch              `json:"exit_epoch,string"`
-	WithdrawableEpoch          phase0.Epoch              `json:"withdrawable_epoch,string"`
+	PublicKey                  phase0.BLSPubKey `json:"pubkey"`
+	WithdrawalCredentials      phase0.Hash32    `json:"withdrawal_credentials"`
+	EffectiveBalance           phase0.Gwei      `json:"effective_balance,string"`
+	Slashed                    bool             `json:"slashed"`
+	ActivationEligibilityEpoch phase0.Epoch     `json:"activation_eligibility_epoch,string"`
+	ActivationEpoch            phase0.Epoch     `json:"activation_epoch,string"`
+	ExitEpoch                  phase0.Epoch     `json:"exit_epoch,string"`
+	WithdrawableEpoch          phase0.Epoch     `json:"withdrawable_epoch,string"`
 }
 
 // ValidatorResponse represents a validator response
@@ -136,13 +136,13 @@ const (
 
 // VersionedSignedBeaconBlock represents a versioned signed beacon block
 type VersionedSignedBeaconBlock struct {
-	Version   BlockVersion                   `json:"version"`
-	Phase0    *phase0.SignedBeaconBlock      `json:"data,omitempty"`
-	Altair    interface{}                    `json:"-"`
-	Bellatrix interface{}                    `json:"-"`
-	Capella   interface{}                    `json:"-"`
-	Deneb     *deneb.SignedBeaconBlock       `json:"-"`
-	Electra   *electra.SignedBeaconBlock     `json:"-"`
+	Version   BlockVersion               `json:"version"`
+	Phase0    *phase0.SignedBeaconBlock  `json:"data,omitempty"`
+	Altair    interface{}                `json:"-"`
+	Bellatrix interface{}                `json:"-"`
+	Capella   interface{}                `json:"-"`
+	Deneb     *deneb.SignedBeaconBlock   `json:"-"`
+	Electra   *electra.SignedBeaconBlock `json:"-"`
 }
 
 // Root returns the block root (state root)

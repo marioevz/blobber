@@ -1,18 +1,19 @@
 package proposal_actions
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
+	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
+	"github.com/attestantio/go-eth2-client/spec/deneb"
+	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/lithammer/dedent"
 	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/kzg"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/pkg/errors"
-	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
-	"github.com/attestantio/go-eth2-client/spec/deneb"
-	"github.com/attestantio/go-eth2-client/spec/phase0"
 )
 
 const MAX_BLOBS_PER_BLOCK = 6
@@ -21,6 +22,7 @@ const MAX_BLOBS_PER_BLOCK = 6
 var (
 	_ = deneb.BlobSidecar{}
 	_ = kzg.RandomBlob
+	_ = context.Background
 )
 
 type ProposalActionBase interface {
@@ -787,14 +789,14 @@ func (s ExtraBlobs) Execute(
 
 	if s.BroadcastBlockFirst {
 		// Broadcast the block
-		if err := testPeers.BroadcastSignedBeaconBlock(signedBlock); err != nil {
+		if err := testPeers.BroadcastSignedBeaconBlock(context.Background(), spec, signedBlock); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 		}
 	}
 
 	if s.BroadcastExtraBlobFirst {
 		// Broadcast the extra blob
-		if err := testPeers.BroadcastSignedBlobSidecar(signedExtraBlob, nil); err != nil {
+		if err := testPeers.BroadcastBlobSidecar(context.Background(), spec, signedExtraBlob.Message, nil); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast extra signed blob sidecar")
 		}
 
@@ -803,7 +805,12 @@ func (s ExtraBlobs) Execute(
 	}
 
 	// Broadcast the correct blobs
-	if err := testPeers.BroadcastSignedBlobSidecars(signedBlobs); err != nil {
+	// Convert signed blobs to unsigned blobs for broadcast
+	unsignedBlobs := make([]*deneb.BlobSidecar, len(signedBlobs))
+	for i, signedBlob := range signedBlobs {
+		unsignedBlobs[i] = signedBlob.Message
+	}
+	if err := testPeers.BroadcastBlobSidecars(context.Background(), spec, unsignedBlobs...); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed blob sidecar")
 	}
 
@@ -812,14 +819,14 @@ func (s ExtraBlobs) Execute(
 		time.Sleep(time.Duration(s.DelayMilliseconds) * time.Millisecond)
 
 		// Broadcast the extra blob
-		if err := testPeers.BroadcastSignedBlobSidecar(signedExtraBlob, nil); err != nil {
+		if err := testPeers.BroadcastBlobSidecar(context.Background(), spec, signedExtraBlob.Message, nil); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast extra signed blob sidecar")
 		}
 	}
 
 	if !s.BroadcastBlockFirst {
 		// Broadcast the block
-		if err := testPeers.BroadcastSignedBeaconBlock(signedBlock); err != nil {
+		if err := testPeers.BroadcastSignedBeaconBlock(context.Background(), spec, signedBlock); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 		}
 	}
@@ -943,7 +950,7 @@ func (s ConflictingBlobs) Execute(
 	}
 
 	// Broadcast the block
-	if err := testPeers.BroadcastSignedBeaconBlock(signedBlock); err != nil {
+	if err := testPeers.BroadcastSignedBeaconBlock(context.Background(), spec, signedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
@@ -1057,13 +1064,18 @@ func (s SwapBlobs) Execute(
 			return false, errors.Wrap(err, "failed to broadcast signed blob sidecars")
 		}
 	} else {
-		if err := testPeers.BroadcastSignedBlobSidecars(signedModifiedBlobs); err != nil {
+		// Convert signed blobs to unsigned blobs for broadcast
+		unsignedModifiedBlobs := make([]*deneb.BlobSidecar, len(signedModifiedBlobs))
+		for i, signedBlob := range signedModifiedBlobs {
+			unsignedModifiedBlobs[i] = signedBlob.Message
+		}
+		if err := testPeers.BroadcastBlobSidecars(context.Background(), spec, unsignedModifiedBlobs...); err != nil {
 			return false, errors.Wrap(err, "failed to broadcast signed blob sidecars")
 		}
 	}
 
 	// Broadcast the block
-	if err := testPeers.BroadcastSignedBeaconBlock(signedBlock); err != nil {
+	if err := testPeers.BroadcastSignedBeaconBlock(context.Background(), spec, signedBlock); err != nil {
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 

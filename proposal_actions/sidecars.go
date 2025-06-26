@@ -79,7 +79,7 @@ func generateKZGCommitmentInclusionProof(body *deneb.BeaconBlockBody, blobIndex 
 	// For now, we'll create a placeholder proof
 	// In a production implementation, this would compute the actual Merkle proof
 	var proof deneb.KZGCommitmentInclusionProof
-	
+
 	// The proof depth depends on the generalized index of blob_kzg_commitments in the body
 	// and the index of the specific commitment within the list
 	// This is a simplified implementation - a full implementation would need to:

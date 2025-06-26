@@ -15,7 +15,7 @@ func TestNewBlobber(t *testing.T) {
 	ctx := context.Background()
 	
 	// Test creating a blobber with minimal config
-	b, err := NewBlobber(ctx,
+	b, err := NewBlobber(ctx, nil,
 		config.WithHost("localhost"),
 		config.WithExternalIP(net.ParseIP("127.0.0.1")),
 		config.WithID(1),
@@ -31,7 +31,7 @@ func TestNewBlobber(t *testing.T) {
 	}
 	
 	// Clean up
-	b.Close()
+	b.Close(ctx)
 	
 	// Verify basic properties
 	if b.Config == nil {
@@ -56,7 +56,7 @@ func TestBlobberWithValidatorKeys(t *testing.T) {
 		200: {},
 	}
 	
-	b, err := NewBlobber(ctx,
+	b, err := NewBlobber(ctx, nil,
 		config.WithHost("localhost"),
 		config.WithExternalIP(net.ParseIP("127.0.0.1")),
 		config.WithID(1),
@@ -80,7 +80,7 @@ func TestBlobberWithValidatorKeys(t *testing.T) {
 func TestBlobberClose(t *testing.T) {
 	ctx := context.Background()
 	
-	b, err := NewBlobber(ctx,
+	b, err := NewBlobber(ctx, nil,
 		config.WithHost("localhost"),
 		config.WithExternalIP(net.ParseIP("127.0.0.1")),
 		config.WithID(1),
@@ -94,16 +94,16 @@ func TestBlobberClose(t *testing.T) {
 	}
 	
 	// Close should not panic
-	b.Close()
+	b.Close(ctx)
 	
 	// Multiple closes should not panic
-	b.Close()
+	b.Close(ctx)
 }
 
 func TestGetProducedBlockRoots(t *testing.T) {
 	ctx := context.Background()
 	
-	b, err := NewBlobber(ctx,
+	b, err := NewBlobber(ctx, nil,
 		config.WithHost("localhost"),
 		config.WithExternalIP(net.ParseIP("127.0.0.1")),
 		config.WithID(1),
@@ -143,7 +143,7 @@ func TestGetProducedBlockRoots(t *testing.T) {
 func TestCalcBeaconBlockDomain(t *testing.T) {
 	ctx := context.Background()
 	
-	b, err := NewBlobber(ctx,
+	b, err := NewBlobber(ctx, nil,
 		config.WithHost("localhost"),
 		config.WithExternalIP(net.ParseIP("127.0.0.1")),
 		config.WithID(1),

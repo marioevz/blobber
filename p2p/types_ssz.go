@@ -2,7 +2,7 @@ package p2p
 
 import (
 	"encoding/binary"
-	
+
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	ssz "github.com/prysmaticlabs/fastssz"
 )

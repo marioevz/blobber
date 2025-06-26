@@ -37,7 +37,7 @@ func (b *BeaconClient) GetAddress() string {
 
 // ENR returns the node's ENR
 func (b *BeaconClient) ENR(ctx context.Context) (string, error) {
-	// This would typically make an API call to get the ENR
-	// For now, return an error indicating ENR is not implemented
+	// Legacy client doesn't have ENR method - this is just a placeholder
+	// The actual ENR retrieval is handled by the adapter which wraps this client
 	return "", fmt.Errorf("ENR retrieval not implemented for legacy client")
 }

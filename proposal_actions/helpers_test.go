@@ -5,16 +5,17 @@ import (
 	_ "embed"
 	"testing"
 
+	"github.com/attestantio/go-eth2-client/spec/deneb"
+	"github.com/attestantio/go-eth2-client/spec/phase0"
 	geth_common "github.com/ethereum/go-ethereum/common"
 	"github.com/marioevz/blobber"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/proposal_actions"
-	"github.com/attestantio/go-eth2-client/spec/deneb"
-	"github.com/attestantio/go-eth2-client/spec/phase0"
 )
 
 //go:embed response_deneb.json
 var responseDeneb string
+
 // Create a mainnet spec map for testing
 var spec = map[string]interface{}{
 	"DOMAIN_BEACON_PROPOSER": phase0.DomainType{0x00, 0x00, 0x00, 0x00},
@@ -31,7 +32,7 @@ func TestBlockSigning(t *testing.T) {
 	if versionedBlockContents.Version != "deneb" {
 		t.Fatalf("wrong version: %s, expected deneb", versionedBlockContents.Version)
 	}
-	
+
 	blockContents := versionedBlockContents.Deneb
 	if blockContents == nil {
 		t.Fatal("deneb block is nil")
@@ -55,14 +56,14 @@ func TestBlockSigning(t *testing.T) {
 	domainType := spec["DOMAIN_BEACON_PROPOSER"].(phase0.DomainType)
 	forkVersion := spec["GENESIS_FORK_VERSION"].(phase0.Version)
 	var forkDataRoot phase0.Root // Using zero root for genesis
-	
+
 	// Compute fork data root
 	forkData := &phase0.ForkData{
 		CurrentVersion:        forkVersion,
 		GenesisValidatorsRoot: phase0.Root{},
 	}
 	forkDataRoot, _ = forkData.HashTreeRoot()
-	
+
 	// Compute domain
 	var beaconBlockDomain phase0.Domain
 	copy(beaconBlockDomain[:], domainType[:])
@@ -127,7 +128,7 @@ func TestBlockCopying(t *testing.T) {
 	if versionedBlockContents.Version != "deneb" {
 		t.Fatalf("wrong version: %s, expected deneb", versionedBlockContents.Version)
 	}
-	
+
 	blockContents := versionedBlockContents.Deneb
 	if blockContents == nil {
 		t.Fatal("deneb block is nil")

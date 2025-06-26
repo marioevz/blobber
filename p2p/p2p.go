@@ -262,6 +262,7 @@ func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(10*1<<20), // 10 MiB
+		pubsub.WithFloodPublish(true), // Enable flood publishing to reach more peers
 	)
 	if err != nil {
 		return nil, err
@@ -331,6 +332,15 @@ func (p *TestPeer) Connect(ctx context.Context, peer *BeaconClientPeer) error {
 	if err := p.SendInitialStatus(ctx, peerAddrInfo.ID); err != nil {
 		return errors.Wrap(err, "could not send initial status")
 	}
+	
+	// Log successful connection
+	protocols, _ := p.Host.Peerstore().GetProtocols(peerAddrInfo.ID)
+	logrus.WithFields(logrus.Fields{
+		"local_peer": p.Host.ID().String(),
+		"remote_peer": peerAddrInfo.ID.String(),
+		"protocols": protocols,
+	}).Info("Successfully connected to beacon node peer")
+	
 	return nil
 }
 
@@ -697,10 +707,20 @@ func (p *TestPeer) GetOrJoinTopic(topic string, opts ...pubsub.TopicOpt) (*pubsu
 	logrus.WithFields(logrus.Fields{
 		"topic": topic,
 		"peer_id": p.Host.ID().String(),
+		"network_peers": len(p.Host.Network().Peers()),
 	}).Debug("Successfully joined and subscribed to topic")
 	
-	// Give the gossip mesh a moment to stabilize after subscription
-	time.Sleep(50 * time.Millisecond)
+	// Give the gossip mesh time to stabilize after subscription
+	// We'll wait a bit here but PublishTopic will also wait for peers
+	time.Sleep(500 * time.Millisecond)
+	
+	// Check if we have any peers in the topic after waiting
+	peers := handle.ListPeers()
+	logrus.WithFields(logrus.Fields{
+		"topic": topic,
+		"peer_count": len(peers),
+		"peers": peers,
+	}).Info("Topic peers after subscription and wait")
 	
 	return handle, nil
 }

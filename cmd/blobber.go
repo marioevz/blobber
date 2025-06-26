@@ -12,11 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/marioevz/blobber"
 	"github.com/marioevz/blobber/beacon"
 	"github.com/marioevz/blobber/config"
+	"github.com/marioevz/blobber/logger"
 	"github.com/marioevz/blobber/proposal_actions"
-	"github.com/sirupsen/logrus"
 )
 
 func init() {
@@ -72,7 +74,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Version: refactor-v7-json-fix\n")
 	fmt.Fprintf(os.Stderr, "Args (%d): %v\n", len(os.Args), os.Args)
 	fmt.Fprintf(os.Stderr, "Working directory: %s\n", mustGetwd())
-	
+
 	// Check if proposal action args are present
 	hasProposalAction := false
 	hasFrequency := false
@@ -86,12 +88,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Found proposal-action-frequency arg: %s\n", arg)
 		}
 	}
-	
+
 	if !hasProposalAction && !hasFrequency {
 		fmt.Fprintf(os.Stderr, "WARNING: No proposal action arguments found in command line!\n")
 		fmt.Fprintf(os.Stderr, "This suggests blobber_extra_params are not being passed from Kurtosis.\n")
 	}
-	
+
 	var (
 		clEndpoints                       arrayFlags
 		nonValidatingClEndpoints          arrayFlags
@@ -230,7 +232,7 @@ func main() {
 		fmt.Println("ERROR: No consensus layer endpoints provided")
 		fatalf("at least one consensus layer client endpoint is required")
 	}
-	
+
 	fmt.Printf("Found %d CL endpoints\n", len(clEndpoints))
 
 	type beaconEndpoint struct {
@@ -253,30 +255,30 @@ func main() {
 				err,
 			)
 		}
-		
+
 		initctx, cancel := context.WithTimeout(
 			context.Background(),
 			time.Second*time.Duration(clientInitTimeoutSeconds),
 		)
 		defer cancel()
-		
+
 		// Create our new beacon client adapter
 		adapter, err := beacon.NewBeaconClientAdapter(initctx, beaconAPIURL)
 		if err != nil {
 			fatalf("error creating beacon client adapter: %v\n", err)
 		}
-		
+
 		// Set up logger on the adapter's embedded BeaconClient
 		if adapter.BeaconClient != nil {
 			adapter.BeaconClient.Logger = &Logger{}
-			
+
 			// Initialize the old client (this populates spec and other fields)
 			if err := adapter.BeaconClient.Init(initctx); err != nil {
 				// Log warning but continue as we're using the new client
 				logrus.WithError(err).Warn("Failed to initialize old beacon client")
 			}
 		}
-		
+
 		beaconClients[i] = beaconEndpoint{
 			BeaconClient: adapter,
 			Validator:    validator,
@@ -306,7 +308,7 @@ func main() {
 	fmt.Printf("beaconPortStart: %d\n", beaconPortStart)
 	fmt.Printf("validatorProxyPortStart: %d\n", validatorProxyPortStart)
 	fmt.Printf("logLevel: %s\n", logLevel)
-	
+
 	// Build base options first
 	blobberOpts := []config.Option{
 		config.WithHost(hostIP),
@@ -328,13 +330,13 @@ func main() {
 
 	fmt.Printf("validatorKeyFilePath: '%s'\n", validatorKeyFilePath)
 	fmt.Printf("validatorKeyFolderPath: '%s'\n", validatorKeyFolderPath)
-	
+
 	if validatorKeyFilePath != "" {
 		fmt.Printf("Adding validator keys from file: %s\n", validatorKeyFilePath)
-		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFile(validatorKeyFilePath))
+		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFile(context.Background(), validatorKeyFilePath))
 	} else if validatorKeyFolderPath != "" {
 		fmt.Printf("Adding validator keys from folder: %s\n", validatorKeyFolderPath)
-		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFolder(validatorKeyFolderPath))
+		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFolder(context.Background(), validatorKeyFolderPath))
 	}
 
 	// Debug output - print all args
@@ -342,38 +344,38 @@ func main() {
 	fmt.Printf("Raw args again: %v\n", os.Args)
 	fmt.Printf("proposalActionJson value: '%s' (len=%d)\n", proposalActionJson, len(proposalActionJson))
 	fmt.Printf("proposalActionFrequency value: %d\n", proposalActionFrequency)
-	
+
 	logrus.Infof("All args: %v", os.Args)
 	logrus.Infof("proposalActionJson: '%s' (len=%d)", proposalActionJson, len(proposalActionJson))
 	logrus.Infof("proposalActionFrequency: %d", proposalActionFrequency)
-	
+
 	// Handle proposal action and frequency together
 	// Trim any whitespace that might have been introduced
 	proposalActionJson = strings.TrimSpace(proposalActionJson)
 	fmt.Printf("After trim, proposalActionJson: '%s' (len=%d)\n", proposalActionJson, len(proposalActionJson))
-	
+
 	if proposalActionJson != "" && proposalActionJson != "{}" {
 		fmt.Println("=== PARSING PROPOSAL ACTION ===")
 		logrus.Infof("Parsing proposal action JSON...")
 		fmt.Printf("About to parse JSON: '%s'\n", proposalActionJson)
-		
+
 		proposalAction, err := proposal_actions.UnmarshallProposalAction([]byte(proposalActionJson))
 		if err != nil {
 			fmt.Printf("ERROR parsing proposal action: %v\n", err)
 			logrus.Errorf("Failed to parse proposal action JSON: %v", err)
 			fatalf("error parsing proposal action JSON '%s': %v\n", proposalActionJson, err)
 		}
-		
+
 		fmt.Printf("Successfully parsed proposal action: %+v\n", proposalAction)
 		logrus.Infof("Successfully parsed proposal action: %v", proposalAction)
-		
+
 		// Set the frequency on the proposal action before adding it
 		if proposalActionFrequency > 0 {
 			fmt.Printf("Setting frequency %d on proposal action\n", proposalActionFrequency)
 			logrus.Infof("Setting frequency %d on proposal action before adding to options", proposalActionFrequency)
 			proposalAction.SetFrequency(uint64(proposalActionFrequency))
 		}
-		
+
 		// Now add the proposal action with frequency already set
 		fmt.Println("Adding proposal action to options...")
 		blobberOpts = append(blobberOpts, config.WithProposalAction(proposalAction))
@@ -397,7 +399,10 @@ func main() {
 		fmt.Printf("Option %d: %s\n", i, opt.Description)
 	}
 
-	b, err := blobber.NewBlobber(context.Background(), blobberOpts...)
+	// Create logger instance
+	log := logger.NewWithLevel(logLevel)
+
+	b, err := blobber.NewBlobber(context.Background(), log, blobberOpts...)
 	if err != nil {
 		fmt.Printf("ERROR: Failed to create blobber\n")
 		fmt.Printf("Error details: %v\n", err)
@@ -424,5 +429,5 @@ func main() {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	<-sigs
 
-	b.Close()
+	b.Close(context.Background())
 }

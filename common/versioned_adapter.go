@@ -5,6 +5,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/deneb"
 	"github.com/attestantio/go-eth2-client/spec/electra"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/holiman/uint256"
 )
 
 // ConvertVersionedToDeneb converts a VersionedBlockContents to Deneb BlockContents for proposal actions
@@ -71,9 +72,45 @@ func convertElectraToDenebBody(electraBody *electra.BeaconBlockBody) *deneb.Beac
 		Deposits:           electraBody.Deposits,
 		VoluntaryExits:     electraBody.VoluntaryExits,
 		SyncAggregate:      electraBody.SyncAggregate,
-		// ExecutionPayload would need special handling - for now use empty
-		ExecutionPayload:   &deneb.ExecutionPayload{},
+		// Convert ExecutionPayload from Electra to Deneb format
+		ExecutionPayload:   convertElectraToDenebPayload(electraBody.ExecutionPayload),
 		BLSToExecutionChanges: electraBody.BLSToExecutionChanges,
 		BlobKZGCommitments: electraBody.BlobKZGCommitments,
 	}
+}
+
+// convertElectraToDenebPayload converts an Electra execution payload to Deneb format
+func convertElectraToDenebPayload(electraPayload *deneb.ExecutionPayload) *deneb.ExecutionPayload {
+	if electraPayload == nil {
+		return nil
+	}
+	
+	// Since Electra uses deneb.ExecutionPayload, we need to ensure nil fields are handled
+	// Create a copy to avoid modifying the original
+	result := &deneb.ExecutionPayload{
+		ParentHash:       electraPayload.ParentHash,
+		FeeRecipient:     electraPayload.FeeRecipient,
+		StateRoot:        electraPayload.StateRoot,
+		ReceiptsRoot:     electraPayload.ReceiptsRoot,
+		LogsBloom:        electraPayload.LogsBloom,
+		PrevRandao:       electraPayload.PrevRandao,
+		BlockNumber:      electraPayload.BlockNumber,
+		GasLimit:         electraPayload.GasLimit,
+		GasUsed:          electraPayload.GasUsed,
+		Timestamp:        electraPayload.Timestamp,
+		ExtraData:        electraPayload.ExtraData,
+		BaseFeePerGas:    electraPayload.BaseFeePerGas,
+		BlockHash:        electraPayload.BlockHash,
+		Transactions:     electraPayload.Transactions,
+		Withdrawals:      electraPayload.Withdrawals,
+		BlobGasUsed:      electraPayload.BlobGasUsed,
+		ExcessBlobGas:    electraPayload.ExcessBlobGas,
+	}
+	
+	// Ensure required fields are not nil
+	if result.BaseFeePerGas == nil {
+		result.BaseFeePerGas = new(uint256.Int)
+	}
+	
+	return result
 }

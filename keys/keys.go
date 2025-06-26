@@ -2,6 +2,7 @@ package keys
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -73,7 +74,7 @@ func (vk *ValidatorKey) PubKeyToHex() string {
 	return hex.EncodeToString(vk.PubKeyToBytes())
 }
 
-func KeyListFromFile(path string) ([]*ValidatorKey, error) {
+func KeyListFromFile(ctx context.Context, path string) ([]*ValidatorKey, error) {
 	// Read file line by line and parse each line as a validator secret key
 	readFile, err := os.Open(path)
 	if err != nil {
@@ -98,7 +99,7 @@ func KeyListFromFile(path string) ([]*ValidatorKey, error) {
 	return validatorKeyList, nil
 }
 
-func KeyListFromFolder(pathStr string) ([]*ValidatorKey, error) {
+func KeyListFromFolder(ctx context.Context, pathStr string) ([]*ValidatorKey, error) {
 	// Load keys from a folder that contains a "secrets" and "keys" subdirectories
 	secretsDir := path.Join(pathStr, "secrets")
 	keysDir := path.Join(pathStr, "keys")

@@ -38,7 +38,7 @@ func TestTypesEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer testPeer.Close()
+	defer testPeer.Close(context.Background())
 
 	var b bytes.Buffer
 	if _, err := sszNetworkEncoder.EncodeWithMaxLength(&b, p2p.WrapSSZObject(testPeer.MetaData)); err != nil {

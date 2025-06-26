@@ -2,17 +2,18 @@ package proposal_actions
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
+	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
+	"github.com/attestantio/go-eth2-client/spec/deneb"
+	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/pkg/errors"
 	blsu "github.com/protolambda/bls12-381-util"
-	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
-	"github.com/attestantio/go-eth2-client/spec/deneb"
-	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/sirupsen/logrus"
 )
 
@@ -175,7 +176,7 @@ func CopyBlockContents(bc *apiv1deneb.BlockContents) (*apiv1deneb.BlockContents,
 	if bc.Block == nil {
 		return nil, errors.New("block contents block is nil")
 	}
-	
+
 	// Deep copy the block
 	copiedBlock := &deneb.BeaconBlock{
 		Slot:          bc.Block.Slot,
@@ -184,37 +185,37 @@ func CopyBlockContents(bc *apiv1deneb.BlockContents) (*apiv1deneb.BlockContents,
 		StateRoot:     bc.Block.StateRoot,
 		Body:          nil, // Will be set below
 	}
-	
+
 	// Deep copy the block body
 	if bc.Block.Body != nil {
 		body := bc.Block.Body
 		copiedBody := &deneb.BeaconBlockBody{
-			RANDAOReveal:      body.RANDAOReveal,
-			ETH1Data:          body.ETH1Data,
-			Graffiti:          body.Graffiti,
-			ProposerSlashings: body.ProposerSlashings,
-			AttesterSlashings: body.AttesterSlashings,
-			Attestations:      body.Attestations,
-			Deposits:          body.Deposits,
-			VoluntaryExits:    body.VoluntaryExits,
-			SyncAggregate:     body.SyncAggregate,
-			ExecutionPayload:  body.ExecutionPayload,
+			RANDAOReveal:          body.RANDAOReveal,
+			ETH1Data:              body.ETH1Data,
+			Graffiti:              body.Graffiti,
+			ProposerSlashings:     body.ProposerSlashings,
+			AttesterSlashings:     body.AttesterSlashings,
+			Attestations:          body.Attestations,
+			Deposits:              body.Deposits,
+			VoluntaryExits:        body.VoluntaryExits,
+			SyncAggregate:         body.SyncAggregate,
+			ExecutionPayload:      body.ExecutionPayload,
 			BLSToExecutionChanges: body.BLSToExecutionChanges,
-			BlobKZGCommitments: body.BlobKZGCommitments,
+			BlobKZGCommitments:    body.BlobKZGCommitments,
 		}
 		copiedBlock.Body = copiedBody
 	}
-	
+
 	// Copy KZG proofs
 	copiedKZGProofs := make([]deneb.KZGProof, len(bc.KZGProofs))
 	copy(copiedKZGProofs, bc.KZGProofs)
-	
+
 	copiedBlockContents := &apiv1deneb.BlockContents{
 		Block:     copiedBlock,
 		KZGProofs: copiedKZGProofs,
 		Blobs:     nil,
 	}
-	
+
 	copiedBlobs, err := CopyBlobs(bc.Blobs)
 	if err != nil {
 		return nil, err
@@ -234,7 +235,7 @@ func MultiPeerBlobBroadcast(spec map[string]interface{}, peers p2p.TestPeers, bl
 	broadcastBlobs := func(testPeer *p2p.TestPeer, blobs []*deneb.BlobSidecar) {
 		defer wg.Done()
 		for i, blob := range blobs {
-			if err := testPeer.BroadcastBlobSidecar(spec, blob, nil); err != nil {
+			if err := testPeer.BroadcastBlobSidecar(context.Background(), spec, blob, nil); err != nil {
 				errs <- errors.Wrapf(err, "failed to broadcast signed blob %d", i)
 				return
 			}
@@ -279,7 +280,7 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 
 	broadcastBlobs := func(testPeer *p2p.TestPeer, blobs []*deneb.BlobSidecar) error {
 		for i, blob := range blobs {
-			if err := testPeer.BroadcastBlobSidecar(b.Spec, blob, nil); err != nil {
+			if err := testPeer.BroadcastBlobSidecar(context.Background(), b.Spec, blob, nil); err != nil {
 				return errors.Wrapf(err, "failed to broadcast signed blob %d", i)
 			}
 		}
@@ -287,7 +288,7 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 	}
 
 	broadcastBlock := func(testPeer *p2p.TestPeer, signedBlock *deneb.SignedBeaconBlock) error {
-		if err := testPeer.BroadcastSignedBeaconBlock(b.Spec, signedBlock); err != nil {
+		if err := testPeer.BroadcastSignedBeaconBlock(context.Background(), b.Spec, signedBlock); err != nil {
 			return errors.Wrap(err, "failed to broadcast signed block")
 		}
 		return nil

@@ -27,6 +27,8 @@ func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, o
 	// or the context is cancelled
 	start := time.Now()
 	lastLogTime := time.Now()
+	waitTime := 1 * time.Second // Wait briefly for peers, but beacon nodes might not subscribe without validators
+	
 	for {
 		topicPeers := topicHandle.ListPeers()
 		if len(topicPeers) > 0 {
@@ -48,14 +50,32 @@ func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, o
 			logrus.WithFields(logrus.Fields{
 				"topic": topicHandle.String(),
 				"waiting_duration": time.Since(start).String(),
+				"topic_peers": len(topicPeers),
 			}).Debug("Still waiting for peers to appear in topic")
 			lastLogTime = time.Now()
+		}
+		
+		// If we've waited long enough, try publishing anyway
+		// Beacon nodes might not subscribe to topics unless they have validators
+		// But with flood publishing enabled, the message might still reach them
+		if time.Since(start) > waitTime {
+			logrus.WithFields(logrus.Fields{
+				"topic": topicHandle.String(),
+				"waited": time.Since(start).String(),
+			}).Warn("No peers subscribed to topic - beacon nodes may not subscribe without active validators. Attempting flood publish.")
+			// Try to publish anyway - with flood publishing enabled, it will reach all connected peers
+			err := topicHandle.Publish(ctx, data, opts...)
+			if err != nil {
+				return errors.Wrap(err, "failed to publish even with flood mode")
+			}
+			logrus.Info("Successfully published message via flood mode despite no topic subscribers")
+			return nil
 		}
 		
 		select {
 		case <-ctx.Done():
 			return errors.Wrapf(ctx.Err(), "topic list of peers was always empty for topic %s, waited for %s", topicHandle.String(), time.Since(start))
-		case <-time.After(1 * time.Millisecond):
+		case <-time.After(10 * time.Millisecond):
 		}
 	}
 }
@@ -82,13 +102,24 @@ func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, []byte, error) {
 }
 
 func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[string]interface{}, signedBeaconBlock *deneb.SignedBeaconBlock) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Second)
+	// Use a longer timeout to account for topic subscription and mesh formation
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
+	
+	// First check if we're connected
+	connCheckCtx, connCancel := context.WithTimeout(ctx, time.Second)
+	defer connCancel()
+	if err := p.WaitForP2PConnection(connCheckCtx); err != nil {
 		return errors.Wrap(err, "failed to wait for p2p connection")
 	}
 
 	topic := signedBeaconBlockToTopic(p.state.GetForkDigest(), sszNetworkEncoder.ProtocolSuffix())
+	
+	logrus.WithFields(logrus.Fields{
+		"topic": topic,
+		"fork_digest": fmt.Sprintf("%x", p.state.GetForkDigest()),
+		"protocol_suffix": sszNetworkEncoder.ProtocolSuffix(),
+	}).Debug("Broadcasting to beacon block topic")
 
 	buf, messageID, err := EncodeGossip(topic, WrapSpecObject(spec, signedBeaconBlock))
 	if err != nil {
@@ -143,9 +174,14 @@ func (p TestPeers) BroadcastSignedBeaconBlock(ctx context.Context, spec map[stri
 }
 
 func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Second)
+	// Use a longer timeout to account for topic subscription and mesh formation
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
+	
+	// First check if we're connected
+	connCheckCtx, connCancel := context.WithTimeout(ctx, time.Second)
+	defer connCancel()
+	if err := p.WaitForP2PConnection(connCheckCtx); err != nil {
 		return errors.Wrap(err, "failed to wait for p2p connection")
 	}
 

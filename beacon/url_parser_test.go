@@ -72,7 +72,7 @@ func TestParseBeaconURL(t *testing.T) {
 			wantErr: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseBeaconURL(tt.input)
@@ -145,7 +145,7 @@ func TestParseBeaconURLEdgeCases(t *testing.T) {
 			wantErr: false,
 		},
 	}
-	
+
 	for _, tc := range edgeCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := ParseBeaconURL(tc.input)

@@ -16,7 +16,7 @@ import (
 // BeaconClientAdapter adapts our go-eth2-client based client to the existing beacon_client interface
 type BeaconClientAdapter struct {
 	*BeaconClient
-	client *Client
+	client  *Client
 	address string
 }
 
@@ -139,32 +139,32 @@ func (a *BeaconClientAdapter) StateValidators(
 func (a *BeaconClientAdapter) BlockV2(ctx context.Context, blockId BlockId) (*VersionedSignedBeaconBlock, error) {
 	// Convert blockId to string
 	blockIDStr := string(blockId)
-	
+
 	// Get the eth2client
 	eth2Client := a.client.GetClient()
-	
+
 	// Use SignedBeaconBlock method which returns versioned data
 	signedBeaconBlockProvider, ok := eth2Client.(eth2client.SignedBeaconBlockProvider)
 	if !ok {
 		return nil, fmt.Errorf("client does not support signed beacon blocks")
 	}
-	
+
 	opts := &eth2api.SignedBeaconBlockOpts{
 		Block: blockIDStr,
 	}
-	
+
 	response, err := signedBeaconBlockProvider.SignedBeaconBlock(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get signed beacon block: %w", err)
 	}
-	
+
 	if response == nil || response.Data == nil {
 		return nil, fmt.Errorf("no block data returned")
 	}
-	
+
 	// Convert go-eth2-client response to our format
 	result := &VersionedSignedBeaconBlock{}
-	
+
 	switch response.Data.Version {
 	case spec.DataVersionPhase0:
 		if response.Data.Phase0 != nil {
@@ -202,7 +202,7 @@ func (a *BeaconClientAdapter) BlockV2(ctx context.Context, blockId BlockId) (*Ve
 	default:
 		return nil, fmt.Errorf("unknown block version: %v", response.Data.Version)
 	}
-	
+
 	return result, nil
 }
 
@@ -292,7 +292,7 @@ func (a *BeaconClientAdapter) ENR(ctx context.Context) (string, error) {
 			return enr, nil
 		}
 	}
-	
+
 	// Fall back to embedded BeaconClient's ENR method if available
 	if a.BeaconClient != nil {
 		enr, err := a.BeaconClient.ENR(ctx)

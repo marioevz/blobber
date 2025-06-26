@@ -2,13 +2,17 @@ package beacon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"time"
 
 	eth2client "github.com/attestantio/go-eth2-client"
 	eth2api "github.com/attestantio/go-eth2-client/api"
 	apiv1 "github.com/attestantio/go-eth2-client/api/v1"
-	"github.com/attestantio/go-eth2-client/http"
+	eth2http "github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/rs/zerolog"
@@ -22,11 +26,11 @@ type Client struct {
 
 // NewClient creates a new beacon client using go-eth2-client
 func NewClient(ctx context.Context, address string) (*Client, error) {
-	client, err := http.New(ctx,
-		http.WithAddress(address),
-		http.WithLogLevel(zerolog.WarnLevel),
-		http.WithTimeout(30*time.Second),
-		http.WithAllowDelayedStart(true),
+	client, err := eth2http.New(ctx,
+		eth2http.WithAddress(address),
+		eth2http.WithLogLevel(zerolog.WarnLevel),
+		eth2http.WithTimeout(30*time.Second),
+		eth2http.WithAllowDelayedStart(true),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create eth2 client: %w", err)
@@ -168,13 +172,59 @@ func (c *Client) BeaconBlock(ctx context.Context, blockID string) (*phase0.Signe
 }
 
 // GetNodeENR retrieves the node's ENR
-// Note: The standard beacon API doesn't directly expose the node's own ENR
-// This is a limitation we need to work around
 func (c *Client) GetNodeENR(ctx context.Context) (string, error) {
-	// The beacon API doesn't have a standard endpoint for getting the node's own ENR
-	// Some implementations might expose it through custom endpoints
-	// For now, we return an error indicating this is not supported
-	return "", fmt.Errorf("ENR retrieval not supported - beacon node API does not expose node's own ENR")
+	// The standard beacon API exposes ENR through /eth/v1/node/identity endpoint
+	// However, go-eth2-client might not have this interface yet
+	// For now, we'll need to make a direct HTTP request
+
+	// Try to make a direct HTTP request to the node identity endpoint
+	// Ensure we handle trailing slashes properly
+	baseURL := strings.TrimRight(c.address, "/")
+	url := fmt.Sprintf("%s/eth/v1/node/identity", baseURL)
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	// Make the request
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to get node identity: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("node identity request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse the response
+	var nodeIdentity struct {
+		Data struct {
+			PeerID             string   `json:"peer_id"`
+			ENR                string   `json:"enr"`
+			P2PAddresses       []string `json:"p2p_addresses"`
+			DiscoveryAddresses []string `json:"discovery_addresses"`
+			Metadata           struct {
+				SeqNumber string `json:"seq_number"`
+				Attnets   string `json:"attnets"`
+			} `json:"metadata"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&nodeIdentity); err != nil {
+		return "", fmt.Errorf("failed to decode node identity response: %w", err)
+	}
+
+	if nodeIdentity.Data.ENR == "" {
+		return "", fmt.Errorf("node identity response does not contain ENR")
+	}
+
+	return nodeIdentity.Data.ENR, nil
 }
 
 // NodeSyncing checks if the node is syncing

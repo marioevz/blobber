@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"runtime"
@@ -230,10 +231,10 @@ func WithValidatorKeysList(vk []*keys.ValidatorKey) Option {
 	}
 }
 
-func WithValidatorKeysListFromFile(path string) Option {
+func WithValidatorKeysListFromFile(ctx context.Context, path string) Option {
 	return Option{
 		apply: func(cfg *Config) error {
-			vk, err := keys.KeyListFromFile(path)
+			vk, err := keys.KeyListFromFile(ctx, path)
 			if err != nil {
 				return err
 			}
@@ -246,10 +247,10 @@ func WithValidatorKeysListFromFile(path string) Option {
 	}
 }
 
-func WithValidatorKeysListFromFolder(path string) Option {
+func WithValidatorKeysListFromFolder(ctx context.Context, path string) Option {
 	return Option{
 		apply: func(cfg *Config) error {
-			vk, err := keys.KeyListFromFolder(path)
+			vk, err := keys.KeyListFromFolder(ctx, path)
 			if err != nil {
 				return err
 			}
@@ -289,7 +290,7 @@ func WithProposalActionFrequency(freq uint64) Option {
 		fmt.Printf("  %s:%d %s\n", file, line, runtime.FuncForPC(pc).Name())
 	}
 	fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-	
+
 	return Option{
 		apply: func(cfg *Config) error {
 			cfg.Lock()

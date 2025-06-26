@@ -16,18 +16,18 @@ func TestGetStateValidators(t *testing.T) {
 		Finalized:           true,
 		Data: []ValidatorResponse{
 			{
-				Index:   100,
-				Balance: 32000000000,
+				Index:   "100",
+				Balance: "32000000000",
 				Status:  "active_ongoing",
 				Validator: Validator{
-					Pubkey:                     [48]byte{1, 2, 3},
-					WithdrawalCredentials:      [32]byte{4, 5, 6},
-					EffectiveBalance:           32000000000,
+					Pubkey:                     HexBytes{1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+					WithdrawalCredentials:      HexBytes{4, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+					EffectiveBalance:           "32000000000",
 					Slashed:                    false,
-					ActivationEligibilityEpoch: 0,
-					ActivationEpoch:            0,
-					ExitEpoch:                  18446744073709551615,
-					WithdrawableEpoch:          18446744073709551615,
+					ActivationEligibilityEpoch: "0",
+					ActivationEpoch:            "0",
+					ExitEpoch:                  "18446744073709551615",
+					WithdrawableEpoch:          "18446744073709551615",
 				},
 			},
 		},
@@ -60,11 +60,11 @@ func TestGetStateValidators(t *testing.T) {
 	}
 	
 	validator := validators[0]
-	if validator.Index != 100 {
-		t.Errorf("expected index 100, got %d", validator.Index)
+	if validator.Index != "100" {
+		t.Errorf("expected index 100, got %s", validator.Index)
 	}
-	if validator.Balance != 32000000000 {
-		t.Errorf("expected balance 32000000000, got %d", validator.Balance)
+	if validator.Balance != "32000000000" {
+		t.Errorf("expected balance 32000000000, got %s", validator.Balance)
 	}
 	if string(validator.Status) != "active_ongoing" {
 		t.Errorf("expected status active_ongoing, got %s", validator.Status)
