@@ -13,7 +13,7 @@ func GetDomainType(spec map[string]interface{}, domain string) (phase0.DomainTyp
 	if !ok {
 		return phase0.DomainType{}, fmt.Errorf("domain type %s not found in spec", domain)
 	}
-	
+
 	switch v := val.(type) {
 	case phase0.DomainType:
 		return v, nil
@@ -39,10 +39,10 @@ func GetForkVersion(spec map[string]interface{}, slot phase0.Slot) (phase0.Versi
 	capellaEpoch := GetSpecValue[phase0.Epoch](spec, "CAPELLA_FORK_EPOCH", phase0.Epoch(0))
 	denebEpoch := GetSpecValue[phase0.Epoch](spec, "DENEB_FORK_EPOCH", phase0.Epoch(0))
 	electraEpoch := GetSpecValue[phase0.Epoch](spec, "ELECTRA_FORK_EPOCH", phase0.Epoch(0))
-	
+
 	slotsPerEpoch := GetSpecValue[uint64](spec, "SLOTS_PER_EPOCH", 32)
 	epoch := phase0.Epoch(uint64(slot) / slotsPerEpoch)
-	
+
 	// Determine fork version based on epoch
 	if electraEpoch != 0 && epoch >= electraEpoch {
 		return GetForkVersionValue(spec, "ELECTRA_FORK_VERSION")
@@ -55,7 +55,7 @@ func GetForkVersion(spec map[string]interface{}, slot phase0.Slot) (phase0.Versi
 	} else if altairEpoch != 0 && epoch >= altairEpoch {
 		return GetForkVersionValue(spec, "ALTAIR_FORK_VERSION")
 	}
-	
+
 	return GetForkVersionValue(spec, "GENESIS_FORK_VERSION")
 }
 
@@ -65,7 +65,7 @@ func GetForkVersionValue(spec map[string]interface{}, key string) (phase0.Versio
 	if !ok {
 		return phase0.Version{}, fmt.Errorf("fork version %s not found in spec", key)
 	}
-	
+
 	switch v := val.(type) {
 	case phase0.Version:
 		return v, nil
@@ -91,12 +91,12 @@ func ComputeDomain(domainType phase0.DomainType, forkVersion phase0.Version, gen
 		GenesisValidatorsRoot: genesisValidatorsRoot,
 	}
 	forkDataRoot, _ := forkData.HashTreeRoot()
-	
+
 	// Compute domain
 	var domain phase0.Domain
 	copy(domain[:], domainType[:])
 	copy(domain[4:], forkDataRoot[:28])
-	
+
 	return domain
 }
 
@@ -111,7 +111,7 @@ func ComputeForkDigest(forkVersion phase0.Version, genesisValidatorsRoot phase0.
 	if err != nil {
 		return [4]byte{}, err
 	}
-	
+
 	// Fork digest is the first 4 bytes of the fork data root
 	var digest [4]byte
 	copy(digest[:], forkDataRoot[:4])
@@ -124,12 +124,12 @@ func GetSpecValue[T any](spec map[string]interface{}, key string, defaultValue T
 	if !ok {
 		return defaultValue
 	}
-	
+
 	// Try direct type assertion
 	if typedVal, ok := val.(T); ok {
 		return typedVal
 	}
-	
+
 	// Handle numeric conversions
 	var result T
 	switch any(result).(type) {
@@ -154,7 +154,7 @@ func GetSpecValue[T any](spec map[string]interface{}, key string, defaultValue T
 			return any(phase0.Epoch(v)).(T)
 		}
 	}
-	
+
 	return defaultValue
 }
 

@@ -28,8 +28,9 @@ func TestNewProxy(t *testing.T) {
 		"localhost",
 		30000,
 		backend.URL,
-		nil,
+		map[string]ResponseCallback{},
 		false,
+		nil, // logger
 	)
 
 	if err != nil {
@@ -90,6 +91,7 @@ func TestProxyWithCallbacks(t *testing.T) {
 		backend.URL,
 		callbacks,
 		false,
+		nil, // logger
 	)
 
 	if err != nil {
@@ -147,6 +149,7 @@ func TestProxyErrorResponse(t *testing.T) {
 			},
 		},
 		true, // alwaysErrorResponse
+		nil,  // logger
 	)
 
 	if err != nil {
@@ -200,6 +203,7 @@ func TestProxyMethods(t *testing.T) {
 		backend.URL,
 		nil,
 		false,
+		nil, // logger
 	)
 
 	if err != nil {

@@ -13,7 +13,7 @@ func CreateMockBeaconServer(t *testing.T, validatorsHandler func(w http.Response
 		switch r.URL.Path {
 		case "/eth/v1/node/version":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"data": map[string]interface{}{
 					"version": "mock/v1.0.0",
 				},

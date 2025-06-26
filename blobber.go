@@ -60,7 +60,7 @@ type Blobber struct {
 	builtBlocksMap    *BuiltBlocksMap
 	includeBlobRecord *common.BlobRecord
 	rejectBlobRecord  *common.BlobRecord
-	
+
 	// Track slots we've already processed to avoid duplicate execution
 	processedSlots sync.Map
 }
@@ -142,6 +142,11 @@ func NewBlobber(ctx context.Context, log logger.Logger, opts ...config.Option) (
 	// Note: ForkDecoder is not needed with go-eth2-client
 	// Fork digest calculation is handled differently
 
+	// Set logger for TestP2P
+	if b.TestP2P != nil {
+		b.TestP2P.SetLogger(log)
+	}
+
 	return b, nil
 }
 
@@ -187,6 +192,7 @@ func (b *Blobber) AddBeaconClient(cl *beacon.BeaconClientAdapter, validatorProxy
 			"/eth/v3/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 3),
 		},
 		b.AlwaysErrorValidatorResponse,
+		b.logger,
 	)
 	if err != nil {
 		panic(err)
@@ -510,18 +516,18 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon.BeaconClientAdapter, id in
 		slotKey := fmt.Sprintf("%d", slot)
 		if _, exists := b.processedSlots.LoadOrStore(slotKey, true); exists {
 			b.logger.WithFields(map[string]interface{}{
-				"slot": slot,
+				"slot":     slot,
 				"proxy_id": id,
 			}).Info("Slot already processed by another proxy, skipping proposal actions")
 			return false, nil
 		}
-		
+
 		// Clean up old slots (keep only last 32 slots)
 		if slotUint > 32 {
 			oldSlotKey := fmt.Sprintf("%d", slotUint-32)
 			b.processedSlots.Delete(oldSlotKey)
 		}
-		
+
 		// Execute the proposal actions
 		if validatorKey == nil {
 			b.logger.Warn("No validator key found, skipping proposal actions")
@@ -531,11 +537,11 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon.BeaconClientAdapter, id in
 		override, err := b.executeProposalActions(cl, blockBlobResponse, validatorKey)
 		if err != nil {
 			b.logger.WithFields(map[string]interface{}{
-				"error": err,
-				"slot": blockBlobResponse.GetSlot(),
+				"error":        err,
+				"slot":         blockBlobResponse.GetSlot(),
 				"always_error": b.AlwaysErrorValidatorResponse,
 			}).Error("Failed to execute proposal actions")
-			
+
 			// Check if we should fail block production on errors
 			if b.AlwaysErrorValidatorResponse {
 				// Fail block production - validator will receive HTTP 500

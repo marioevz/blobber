@@ -29,7 +29,7 @@ func (vk *ValidatorKey) FromBytes(secretKey []byte) error {
 		return fmt.Errorf("invalid secret key length: %d, expected 32", len(secretKey))
 	}
 	vk.ValidatorSecretKey = new(blsu.SecretKey)
-	vk.ValidatorSecretKey.Deserialize((*[32]byte)(secretKey))
+	_ = vk.ValidatorSecretKey.Deserialize((*[32]byte)(secretKey))
 	return vk.FillPubKey()
 }
 
@@ -80,7 +80,7 @@ func KeyListFromFile(ctx context.Context, path string) ([]*ValidatorKey, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %s", err)
 	}
-	defer readFile.Close()
+	defer func() { _ = readFile.Close() }()
 	fileScanner := bufio.NewScanner(readFile)
 
 	fileScanner.Split(bufio.ScanLines)
@@ -153,7 +153,9 @@ func KeyListFromFolder(ctx context.Context, pathStr string) ([]*ValidatorKey, er
 		}
 
 		validatorKey := new(ValidatorKey)
-		validatorKey.FromBytes(secretKey)
+		if err := validatorKey.FromBytes(secretKey); err != nil {
+			return nil, errors.Wrap(err, "failed to deserialize validator key")
+		}
 
 		logrus.WithFields(
 			logrus.Fields{

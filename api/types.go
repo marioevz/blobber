@@ -16,16 +16,16 @@ func (h *HexBytes) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &str); err != nil {
 		return err
 	}
-	
+
 	// Remove 0x prefix if present
 	str = strings.TrimPrefix(str, "0x")
-	
+
 	// Decode hex string
 	decoded, err := hex.DecodeString(str)
 	if err != nil {
 		return fmt.Errorf("invalid hex string: %w", err)
 	}
-	
+
 	*h = decoded
 	return nil
 }
@@ -125,8 +125,8 @@ const (
 
 // ValidatorResponse represents a validator response from the API
 type ValidatorResponse struct {
-	Index     string    `json:"index"`     // Changed to string as beacon nodes return this as string
-	Balance   string    `json:"balance"`   // Changed to string for consistency
+	Index     string    `json:"index"`   // Changed to string as beacon nodes return this as string
+	Balance   string    `json:"balance"` // Changed to string for consistency
 	Status    string    `json:"status"`
 	Validator Validator `json:"validator"`
 }

@@ -10,9 +10,8 @@ import (
 	"net/http/httputil"
 	"net/url"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/gorilla/mux"
+	"github.com/marioevz/blobber/logger"
 )
 
 type ValidatorProxy struct {
@@ -25,6 +24,7 @@ type ValidatorProxy struct {
 
 	srv    *http.Server
 	cancel context.CancelFunc
+	logger logger.Logger
 }
 
 type ResponseCallback func(request *http.Request, response []byte) (bool, error)
@@ -37,12 +37,15 @@ func NewProxy(
 	destination string,
 	responseCallbacks map[string]ResponseCallback,
 	alwaysErrorResponse bool,
+	log logger.Logger,
 ) (*ValidatorProxy, error) {
 	proxy := &ValidatorProxy{
 		host: host,
 		port: port,
+		id:   id,
 
 		alwaysError: alwaysErrorResponse,
+		logger:      log,
 	}
 
 	router := mux.NewRouter()
@@ -118,7 +121,7 @@ func (v *ValidatorProxy) proxyHandler(p *httputil.ReverseProxy, callback Respons
 		// We may want to filter some headers, otherwise we could just use a shallow copy
 		// proxyReq.Header = req.Header
 		proxyReq.Header = make(http.Header)
-		fields := make(logrus.Fields)
+		fields := make(map[string]interface{})
 		fields["fullUrl"] = fullUrl.String()
 		for h, val := range r.Header {
 			if h == "Accept-Encoding" {
@@ -132,7 +135,9 @@ func (v *ValidatorProxy) proxyHandler(p *httputil.ReverseProxy, callback Respons
 			fields[h] = val
 			proxyReq.Header[h] = val
 		}
-		logrus.WithFields(fields).Debug("Proxying request")
+		if v.logger != nil {
+			v.logger.WithFields(fields).Debug("Proxying request")
+		}
 
 		client := &http.Client{}
 		proxyRes, err := client.Do(proxyReq)
@@ -146,8 +151,8 @@ func (v *ValidatorProxy) proxyHandler(p *httputil.ReverseProxy, callback Respons
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		proxyRes.Body.Close()
-		
+		_ = proxyRes.Body.Close()
+
 		// Check if the beacon node returned an error
 		if proxyRes.StatusCode >= 400 {
 			// Forward the error response directly
@@ -157,22 +162,26 @@ func (v *ValidatorProxy) proxyHandler(p *httputil.ReverseProxy, callback Respons
 				}
 			}
 			w.WriteHeader(proxyRes.StatusCode)
-			w.Write(modifiedResp)
+			_, _ = w.Write(modifiedResp)
 			return
 		}
 
 		// Execute the callback only for successful responses
 		if override, err := callback(r, modifiedResp); err != nil {
-			logrus.WithError(err).Error("Could not execute callback, returning response to validator client")
+			if v.logger != nil {
+				v.logger.WithField("error", err).Error("Could not execute callback, returning response to validator client")
+			}
 			if v.alwaysError {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		} else if override {
-			logrus.WithFields(logrus.Fields{
-				"method": r.Method,
-				"url":    r.URL.String(),
-			}).Debug("Overriding response")
+			if v.logger != nil {
+				v.logger.WithFields(map[string]interface{}{
+					"method": r.Method,
+					"url":    r.URL.String(),
+				}).Debug("Overriding response")
+			}
 			http.Error(w, "overriding response", http.StatusInternalServerError)
 			return
 		}
@@ -183,12 +192,12 @@ func (v *ValidatorProxy) proxyHandler(p *httputil.ReverseProxy, callback Respons
 				w.Header().Add(k, v)
 			}
 		}
-		
+
 		// Write the status code (default 200 if not set)
 		w.WriteHeader(proxyRes.StatusCode)
-		
+
 		// Write the response body
-		w.Write(modifiedResp)
+		_, _ = w.Write(modifiedResp)
 	}
 }
 
@@ -205,18 +214,22 @@ func (p *ValidatorProxy) Start(ctx context.Context) error {
 		return ctx
 	}
 
-	fields := logrus.Fields{
-		"validator_proxy_id": p.id,
-		"port":               p.port,
-		// "pubkey":             p.pkBeacon.String(),
-		"listening_endpoint": p.Address(),
+	if p.logger != nil {
+		fields := map[string]interface{}{
+			"validator_proxy_id": p.id,
+			"port":               p.port,
+			// "pubkey":             p.pkBeacon.String(),
+			"listening_endpoint": p.Address(),
+		}
+		p.logger.WithFields(fields).Info("Proxy now listening")
 	}
-	logrus.WithFields(fields).Info("Proxy now listening")
 	go func() {
 		if err := p.srv.ListenAndServe(); err != nil {
-			logrus.WithFields(logrus.Fields{
-				"validator_proxy_id": p.id,
-			}).Error(err)
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"validator_proxy_id": p.id,
+				}).Error(err)
+			}
 		}
 	}()
 	for {

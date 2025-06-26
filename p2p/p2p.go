@@ -26,8 +26,8 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/pkg/errors"
 	bitfield "github.com/prysmaticlabs/go-bitfield"
-	"github.com/sirupsen/logrus"
 
+	"github.com/marioevz/blobber/logger"
 	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p/encoder"
 )
 
@@ -68,6 +68,9 @@ type TestP2P struct {
 	ExternalIP             net.IP
 	BeaconPortStart        int64
 	MaxDevP2PSessionReuses int
+
+	// Logger
+	logger logger.Logger
 }
 
 type TestPeerIndex uint64
@@ -121,10 +124,13 @@ type TestPeer struct {
 	cancel   context.CancelFunc
 	MetaData *Metadata
 	state    *Status
-	
+
 	// Topic management
 	topicHandles map[string]*pubsub.Topic
 	topicMutex   sync.RWMutex
+
+	// Logger
+	logger logger.Logger
 }
 
 type TestPeers []*TestPeer
@@ -171,41 +177,45 @@ func ConvertFromInterfacePrivKey(privkey crypto.PrivKey) (*ecdsa.PrivateKey, err
 
 func (t *TestP2P) GetTestPeer(ctx context.Context, count int) (TestPeers, error) {
 	var testPeers TestPeers
-	
-	logrus.WithFields(logrus.Fields{
-		"count": count,
-		"has_last_peer": t.lastTestPeer != nil,
-		"test_peer_uses": t.testPeerUses,
-		"max_reuses": t.MaxDevP2PSessionReuses,
-	}).Debug("GetTestPeer called")
+
+	if t.logger != nil {
+		t.logger.WithFields(map[string]interface{}{
+			"count":          count,
+			"has_last_peer":  t.lastTestPeer != nil,
+			"test_peer_uses": t.testPeerUses,
+			"max_reuses":     t.MaxDevP2PSessionReuses,
+		}).Debug("GetTestPeer called")
+	}
 
 	if t.lastTestPeer != nil {
 		// Check if we should reuse or if the count changed
 		shouldReuse := t.MaxDevP2PSessionReuses == 0 || t.testPeerUses < t.MaxDevP2PSessionReuses
 		sameCount := len(t.lastTestPeer) == count
-		
+
 		// Also check if peers are still connected
 		allConnected := true
 		if shouldReuse && sameCount {
 			for _, tp := range t.lastTestPeer {
 				peerCount := len(tp.Host.Network().Peers())
 				if peerCount == 0 {
-					logrus.WithFields(logrus.Fields{
-						"peer_id": tp.Host.ID().String(),
-						"peer_count": peerCount,
-					}).Debug("Test peer has no connections, will create new peer")
+					if t.logger != nil {
+						t.logger.WithFields(map[string]interface{}{
+							"peer_id":    tp.Host.ID().String(),
+							"peer_count": peerCount,
+						}).Debug("Test peer has no connections, will create new peer")
+					}
 					allConnected = false
 					break
 				}
 			}
 		}
-		
+
 		if shouldReuse && sameCount && allConnected {
 			testPeers = t.lastTestPeer
 			t.testPeerUses++
 		} else {
 			// Close the last one
-			t.lastTestPeer.Close(context.Background())
+			_ = t.lastTestPeer.Close(context.Background())
 			t.lastTestPeer = nil
 			t.testPeerUses = 0
 		}
@@ -218,7 +228,7 @@ func (t *TestP2P) GetTestPeer(ctx context.Context, count int) (TestPeers, error)
 			testPeer, err := t.NewTestPeer(ctx, t.BeaconPortStart+int64(i))
 			if err != nil {
 				// close the ones we actually created
-				testPeers.Close(context.Background())
+				_ = testPeers.Close(context.Background())
 				return nil, errors.Wrap(err, "failed to create p2p")
 			}
 			testPeers = append(testPeers, testPeer)
@@ -228,6 +238,10 @@ func (t *TestP2P) GetTestPeer(ctx context.Context, count int) (TestPeers, error)
 	}
 
 	return testPeers, nil
+}
+
+func (t *TestP2P) SetLogger(log logger.Logger) {
+	t.logger = log
 }
 
 func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error) {
@@ -262,7 +276,7 @@ func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(10*1<<20), // 10 MiB
-		pubsub.WithFloodPublish(true), // Enable flood publishing to reach more peers
+		pubsub.WithFloodPublish(true),       // Enable flood publishing to reach more peers
 	)
 	if err != nil {
 		return nil, err
@@ -296,9 +310,10 @@ func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error
 		ctx:          ctx,
 		cancel:       cancel,
 		topicHandles: make(map[string]*pubsub.Topic),
+		logger:       t.logger,
 	}
 	if err := testPeer.SetupStreams(context.Background()); err != nil {
-		testPeer.Close(context.Background())
+		_ = testPeer.Close(context.Background())
 		return nil, err
 	}
 	return testPeer, nil
@@ -320,37 +335,43 @@ func (p *TestPeer) Connect(ctx context.Context, peer *BeaconClientPeer) error {
 	// Set up disconnect notification
 	p.Host.Network().Notify(&network.NotifyBundle{
 		DisconnectedF: func(n network.Network, c network.Conn) {
-			logrus.WithFields(logrus.Fields{
-				"peer": c.RemotePeer().String(),
-				"local": c.LocalPeer().String(),
-			}).Debug("Peer disconnected")
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer":  c.RemotePeer().String(),
+					"local": c.LocalPeer().String(),
+				}).Debug("Peer disconnected")
+			}
 		},
 	})
 
-	p.Host.Peerstore().AddProtocols(peerAddrInfo.ID, StatusProtocolID, GoodbyeProtocolID, PingProtocolID, MetaDataProtocolID)
+	_ = p.Host.Peerstore().AddProtocols(peerAddrInfo.ID, StatusProtocolID, GoodbyeProtocolID, PingProtocolID, MetaDataProtocolID)
 
 	if err := p.SendInitialStatus(ctx, peerAddrInfo.ID); err != nil {
 		return errors.Wrap(err, "could not send initial status")
 	}
-	
+
 	// Log successful connection
 	protocols, _ := p.Host.Peerstore().GetProtocols(peerAddrInfo.ID)
-	logrus.WithFields(logrus.Fields{
-		"local_peer": p.Host.ID().String(),
-		"remote_peer": peerAddrInfo.ID.String(),
-		"protocols": protocols,
-	}).Info("Successfully connected to beacon node peer")
-	
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"local_peer":  p.Host.ID().String(),
+			"remote_peer": peerAddrInfo.ID.String(),
+			"protocols":   protocols,
+		}).Info("Successfully connected to beacon node peer")
+	}
+
 	return nil
 }
 
 func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 	// Open stream
 	peerInfo := p.Host.Peerstore().PeerInfo(peer)
-	logrus.WithFields(logrus.Fields{
-		"id":   p.ID,
-		"peer": peerInfo.ID.String(),
-	}).Debug("Opening stream")
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"id":   p.ID,
+			"peer": peerInfo.ID.String(),
+		}).Debug("Opening stream")
+	}
 	s, err := p.Host.NewStream(ctx, peer, StatusProtocolID)
 	if err != nil {
 		return errors.Wrap(err, "failed to open stream")
@@ -359,16 +380,18 @@ func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 	// Log sent request
 	p.state.Lock()
 	defer p.state.Unlock()
-	logrus.WithFields(logrus.Fields{
-		"id":              p.ID,
-		"protocol":        s.Protocol(),
-		"peer":            s.Conn().RemotePeer().String(),
-		"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
-		"finalized_root":  p.state.FinalizedRoot.String(),
-		"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
-		"head_root":       p.state.HeadRoot.String(),
-		"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
-	}).Debug("Sending initial status")
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"id":              p.ID,
+			"protocol":        s.Protocol(),
+			"peer":            s.Conn().RemotePeer().String(),
+			"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
+			"finalized_root":  p.state.FinalizedRoot.String(),
+			"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
+			"head_root":       p.state.HeadRoot.String(),
+			"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
+		}).Debug("Sending initial status")
+	}
 
 	// Send response code first
 	if _, err := s.Write([]byte{0x00}); err != nil {
@@ -387,37 +410,49 @@ func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 	// First read the response code
 	responseByte := make([]byte, 1)
 	if _, err := io.ReadFull(s, responseByte); err != nil {
-		logrus.WithError(err).Warn("Failed to read response code")
+		if p.logger != nil {
+			p.logger.WithField("error", err).Warn("Failed to read response code")
+		}
 		// Don't fail here - some nodes might not respond properly
 	} else if responseByte[0] != 0x00 {
-		logrus.WithField("code", fmt.Sprintf("0x%02x", responseByte[0])).Warn("Received non-success response code")
+		if p.logger != nil {
+			p.logger.WithField("code", fmt.Sprintf("0x%02x", responseByte[0])).Warn("Received non-success response code")
+		}
 	} else {
 		// Read the actual status message
 		var status StatusData
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &status); err != nil {
-			logrus.WithError(err).Warn("Failed to decode status response from peer")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Warn("Failed to decode status response from peer")
+			}
 		} else {
 			// Check if fork digests match
 			if status.ForkDigest != p.state.ForkDigest {
-				logrus.WithFields(logrus.Fields{
-					"our_fork_digest":  fmt.Sprintf("%x", p.state.ForkDigest),
-					"peer_fork_digest": fmt.Sprintf("%x", status.ForkDigest),
-				}).Warn("Fork digest mismatch with peer")
+				if p.logger != nil {
+					p.logger.WithFields(map[string]interface{}{
+						"our_fork_digest":  fmt.Sprintf("%x", p.state.ForkDigest),
+						"peer_fork_digest": fmt.Sprintf("%x", status.ForkDigest),
+					}).Warn("Fork digest mismatch with peer")
+				}
 			}
-			logrus.WithFields(logrus.Fields{
-				"our_fork_digest":      fmt.Sprintf("%x", p.state.ForkDigest),
-				"peer_fork_digest":     fmt.Sprintf("%x", status.ForkDigest),
-				"peer_finalized_root":  status.FinalizedRoot.String(),
-				"peer_finalized_epoch": fmt.Sprintf("%d", status.FinalizedEpoch),
-				"peer_head_root":       status.HeadRoot.String(),
-				"peer_head_slot":       fmt.Sprintf("%d", status.HeadSlot),
-			}).Debug("Received status response from peer")
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"our_fork_digest":      fmt.Sprintf("%x", p.state.ForkDigest),
+					"peer_fork_digest":     fmt.Sprintf("%x", status.ForkDigest),
+					"peer_finalized_root":  status.FinalizedRoot.String(),
+					"peer_finalized_epoch": fmt.Sprintf("%d", status.FinalizedEpoch),
+					"peer_head_root":       status.HeadRoot.String(),
+					"peer_head_slot":       fmt.Sprintf("%d", status.HeadSlot),
+				}).Debug("Received status response from peer")
+			}
 		}
 	}
 
 	// Close the stream properly
 	if err := s.Close(); err != nil {
-		logrus.WithError(err).Debug("Failed to close status stream")
+		if p.logger != nil {
+			p.logger.WithField("error", err).Debug("Failed to close status stream")
+		}
 	}
 
 	return nil
@@ -428,18 +463,25 @@ func (p *TestPeer) Close(ctx context.Context) error {
 	p.topicMutex.Lock()
 	for topic, handle := range p.topicHandles {
 		if err := handle.Close(); err != nil {
-			logrus.WithError(err).WithField("topic", topic).Error("Failed to close topic handle")
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"error": err,
+					"topic": topic,
+				}).Error("Failed to close topic handle")
+			}
 		}
 	}
 	p.topicHandles = make(map[string]*pubsub.Topic)
 	p.topicMutex.Unlock()
-	
+
 	// Send goodbye to each peer
 	peers := p.Host.Network().Peers()
 	if len(peers) > 0 {
 		for i, peer := range peers {
 			if err := p.Goodbye(p.ctx, peer); err != nil {
-				logrus.WithError(err).Errorf("failed to send goodbye to peer %d", i)
+				if p.logger != nil {
+					p.logger.WithField("error", err).Errorf("failed to send goodbye to peer %d", i)
+				}
 			}
 		}
 	}
@@ -473,189 +515,255 @@ func (p *TestPeer) SetupStreams(ctx context.Context) error {
 	// Prepare stream responses for the basic Req/Resp protocols.
 
 	// Status
-	logrus.Debug("Setting up status handler")
+	if p.logger != nil {
+		p.logger.Debug("Setting up status handler")
+	}
 	p.Host.SetStreamHandler(StatusProtocolID, func(s network.Stream) {
 		defer func() {
-			logrus.Debug("Finished responding to status request")
+			if p.logger != nil {
+				p.logger.Debug("Finished responding to status request")
+			}
 		}()
-		logrus.WithFields(logrus.Fields{
-			"id":       p.ID,
-			"protocol": s.Protocol(),
-			"peer":     s.Conn().RemotePeer().String(),
-		}).Debug("Got a new stream")
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":       p.ID,
+				"protocol": s.Protocol(),
+				"peer":     s.Conn().RemotePeer().String(),
+			}).Debug("Got a new stream")
+		}
 		// Read the incoming message into the appropriate struct.
 		var out StatusData
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, WrapSSZObject(&out)); err != nil {
-			logrus.WithError(err).Error("Failed to decode incoming message")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to decode incoming message")
+			}
 			return
 		}
 		// Log received data
-		logrus.WithFields(logrus.Fields{
-			"id":              p.ID,
-			"protocol":        s.Protocol(),
-			"peer":            s.Conn().RemotePeer().String(),
-			"fork_digest":     fmt.Sprintf("%x", out.ForkDigest),
-			"finalized_root":  out.FinalizedRoot.String(),
-			"finalized_epoch": fmt.Sprintf("%d", out.FinalizedEpoch),
-			"head_root":       out.HeadRoot.String(),
-			"head_slot":       fmt.Sprintf("%d", out.HeadSlot),
-		}).Debug("Received data")
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":              p.ID,
+				"protocol":        s.Protocol(),
+				"peer":            s.Conn().RemotePeer().String(),
+				"fork_digest":     fmt.Sprintf("%x", out.ForkDigest),
+				"finalized_root":  out.FinalizedRoot.String(),
+				"finalized_epoch": fmt.Sprintf("%d", out.FinalizedEpoch),
+				"head_root":       out.HeadRoot.String(),
+				"head_slot":       fmt.Sprintf("%d", out.HeadSlot),
+			}).Debug("Received data")
+		}
 
 		// Construct response
 		p.state.Lock()
 		defer p.state.Unlock()
 
 		// Log received data
-		logrus.WithFields(logrus.Fields{
-			"id":              p.ID,
-			"protocol":        s.Protocol(),
-			"peer":            s.Conn().RemotePeer().String(),
-			"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
-			"finalized_root":  p.state.FinalizedRoot.String(),
-			"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
-			"head_root":       p.state.HeadRoot.String(),
-			"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
-		}).Debug("Response data")
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":              p.ID,
+				"protocol":        s.Protocol(),
+				"peer":            s.Conn().RemotePeer().String(),
+				"fork_digest":     fmt.Sprintf("%x", p.state.ForkDigest),
+				"finalized_root":  p.state.FinalizedRoot.String(),
+				"finalized_epoch": fmt.Sprintf("%d", p.state.FinalizedEpoch),
+				"head_root":       p.state.HeadRoot.String(),
+				"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
+			}).Debug("Response data")
+		}
 
 		// Send response
 		if _, err := s.Write([]byte{0x00}); err != nil {
-			logrus.WithError(err).Error("Failed to send status response")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to send status response")
+			}
 			return
 		}
 		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(p.state.StatusData)); err != nil {
-			logrus.WithError(err).Error("Failed to encode outgoing message")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to encode outgoing message")
+			}
 			return
 		} else {
-			logrus.WithField("bytes", n).Debug("Sent data")
+			if p.logger != nil {
+				p.logger.WithField("bytes", n).Debug("Sent data")
+			}
 		}
 		// Try to close the stream, but don't worry if it fails (might already be closed)
 		if err := s.Close(); err != nil {
 			// Only log as debug since this often happens when peer closes first
-			logrus.WithError(err).Debug("Stream close error (expected if peer closed first)")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Debug("Stream close error (expected if peer closed first)")
+			}
 			return
 		}
 	})
 
 	// Goodbye
-	logrus.Debug("Setting up goodbye handler")
+	if p.logger != nil {
+		p.logger.Debug("Setting up goodbye handler")
+	}
 	p.Host.SetStreamHandler(GoodbyeProtocolID, func(s network.Stream) {
 		defer func() {
-			logrus.Debug("Finished responding to goodbye request")
+			if p.logger != nil {
+				p.logger.Debug("Finished responding to goodbye request")
+			}
 		}()
-		logrus.WithFields(logrus.Fields{
-			"id":       p.ID,
-			"protocol": s.Protocol(),
-			"peer":     s.Conn().RemotePeer().String(),
-		}).Debug("Got a new stream")
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":       p.ID,
+				"protocol": s.Protocol(),
+				"peer":     s.Conn().RemotePeer().String(),
+			}).Debug("Got a new stream")
+		}
 		// Read the incoming message into the appropriate struct.
 		var out Goodbye
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, WrapSSZObject(&out)); err != nil {
-			logrus.WithError(err).Error("Failed to decode incoming message")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to decode incoming message")
+			}
 			return
 		}
 		// Log received data
-		logrus.WithFields(logrus.Fields{
-			"id":       p.ID,
-			"protocol": s.Protocol(),
-			"peer":     s.Conn().RemotePeer().String(),
-			"reason":   fmt.Sprintf("%d", out),
-		}).Debug("Received data")
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":       p.ID,
+				"protocol": s.Protocol(),
+				"peer":     s.Conn().RemotePeer().String(),
+				"reason":   fmt.Sprintf("%d", out),
+			}).Debug("Received data")
+		}
 
 		// Construct response
 		var resp Goodbye
 
 		// Send response
 		if _, err := s.Write([]byte{0x00}); err != nil {
-			logrus.WithError(err).Error("Failed to send status response")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to send status response")
+			}
 			return
 		}
 		if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(&resp)); err != nil {
-			logrus.WithError(err).Error("Failed to encode outgoing message")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to encode outgoing message")
+			}
 			return
 		}
 
 		if err := s.Close(); err != nil {
-			logrus.WithError(err).Error("Failed to close stream")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to close stream")
+			}
 			return
 		}
 	})
 
 	// Ping
-	logrus.Debug("Setting up ping handler")
+	if p.logger != nil {
+		p.logger.Debug("Setting up ping handler")
+	}
 	p.Host.SetStreamHandler(PingProtocolID, func(s network.Stream) {
 		defer func() {
-			logrus.Debug("Finished responding to ping request")
+			if p.logger != nil {
+				p.logger.Debug("Finished responding to ping request")
+			}
 		}()
-		logrus.WithFields(logrus.Fields{
-			"id":       p.ID,
-			"protocol": s.Protocol(),
-			"peer":     s.Conn().RemotePeer().String(),
-		}).Debug("Got a new stream")
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":       p.ID,
+				"protocol": s.Protocol(),
+				"peer":     s.Conn().RemotePeer().String(),
+			}).Debug("Got a new stream")
+		}
 		// Read the incoming message into the appropriate struct.
 		var out Ping
 		if err := sszNetworkEncoder.DecodeWithMaxLength(s, WrapSSZObject(&out)); err != nil {
-			logrus.WithError(err).Error("Failed to decode incoming message")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to decode incoming message")
+			}
 			return
 		}
 		// Log received data
-		logrus.WithFields(logrus.Fields{
-			"id":        p.ID,
-			"protocol":  s.Protocol(),
-			"peer":      s.Conn().RemotePeer().String(),
-			"ping_data": fmt.Sprintf("%d", out),
-		}).Debug("Received data")
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":        p.ID,
+				"protocol":  s.Protocol(),
+				"peer":      s.Conn().RemotePeer().String(),
+				"ping_data": fmt.Sprintf("%d", out),
+			}).Debug("Received data")
+		}
 
 		// Construct response
 		resp := Ping(p.MetaData.SeqNumber)
 		// Send response
 		if _, err := s.Write([]byte{0x00}); err != nil {
-			logrus.WithError(err).Error("Failed to send status response")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to send status response")
+			}
 			return
 		}
 		if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(&resp)); err != nil {
-			logrus.WithError(err).Error("Failed to encode outgoing message")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to encode outgoing message")
+			}
 			return
 		}
 
 		if err := s.Close(); err != nil {
-			logrus.WithError(err).Error("Failed to close stream")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to close stream")
+			}
 			return
 		}
 	})
 
 	// MetaData
-	logrus.Debug("Setting up metadata handler")
+	if p.logger != nil {
+		p.logger.Debug("Setting up metadata handler")
+	}
 	p.Host.SetStreamHandler(MetaDataProtocolID, func(s network.Stream) {
 		defer func() {
-			logrus.Debug("Finished responding to metadata request")
+			if p.logger != nil {
+				p.logger.Debug("Finished responding to metadata request")
+			}
 		}()
-		logrus.WithFields(logrus.Fields{
-			"id":       p.ID,
-			"protocol": s.Protocol(),
-			"peer":     s.Conn().RemotePeer().String(),
-		}).Debug("Got a new stream")
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":       p.ID,
+				"protocol": s.Protocol(),
+				"peer":     s.Conn().RemotePeer().String(),
+			}).Debug("Got a new stream")
+		}
 
 		// Construct response
 		resp := p.MetaData
 		// Send response
 		totalBytesWritten := 0
 		if n, err := s.Write([]byte{0x00}); err != nil {
-			logrus.WithError(err).Error("Failed to send status response")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to send status response")
+			}
 			return
 		} else {
 			totalBytesWritten += n
 		}
 		if n, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(resp)); err != nil {
-			logrus.WithError(err).Error("Failed to encode outgoing message")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to encode outgoing message")
+			}
 			return
 		} else {
 			totalBytesWritten += n
 		}
 
-		logrus.WithField("bytes", totalBytesWritten).Debug("Sent data")
+		if p.logger != nil {
+			p.logger.WithField("bytes", totalBytesWritten).Debug("Sent data")
+		}
 
 		if err := s.Close(); err != nil {
-			logrus.WithError(err).Error("Failed to close stream")
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to close stream")
+			}
 			return
 		}
 	})
@@ -683,10 +791,10 @@ func (p *TestPeer) GetOrJoinTopic(topic string, opts ...pubsub.TopicOpt) (*pubsu
 	// This is necessary for peers to see us in their topic peer list
 	sub, err := handle.Subscribe()
 	if err != nil {
-		handle.Close()
+		_ = handle.Close()
 		return nil, errors.Wrap(err, "failed to subscribe to topic")
 	}
-	
+
 	// We need to keep the subscription alive but we're not actually reading messages
 	// Start a goroutine to consume messages (and discard them)
 	go func() {
@@ -703,25 +811,29 @@ func (p *TestPeer) GetOrJoinTopic(topic string, opts ...pubsub.TopicOpt) (*pubsu
 
 	// Store the handle
 	p.topicHandles[topic] = handle
-	
-	logrus.WithFields(logrus.Fields{
-		"topic": topic,
-		"peer_id": p.Host.ID().String(),
-		"network_peers": len(p.Host.Network().Peers()),
-	}).Debug("Successfully joined and subscribed to topic")
-	
+
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"topic":         topic,
+			"peer_id":       p.Host.ID().String(),
+			"network_peers": len(p.Host.Network().Peers()),
+		}).Debug("Successfully joined and subscribed to topic")
+	}
+
 	// Give the gossip mesh time to stabilize after subscription
 	// We'll wait a bit here but PublishTopic will also wait for peers
 	time.Sleep(500 * time.Millisecond)
-	
+
 	// Check if we have any peers in the topic after waiting
 	peers := handle.ListPeers()
-	logrus.WithFields(logrus.Fields{
-		"topic": topic,
-		"peer_count": len(peers),
-		"peers": peers,
-	}).Info("Topic peers after subscription and wait")
-	
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"topic":      topic,
+			"peer_count": len(peers),
+			"peers":      peers,
+		}).Info("Topic peers after subscription and wait")
+	}
+
 	return handle, nil
 }
 

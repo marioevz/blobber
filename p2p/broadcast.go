@@ -12,9 +12,9 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/deneb"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
+	"github.com/marioevz/blobber/logger"
 	"github.com/pkg/errors"
 	fastssz "github.com/prysmaticlabs/fastssz"
-	"github.com/sirupsen/logrus"
 )
 
 var (
@@ -22,18 +22,18 @@ var (
 	MESSAGE_DOMAIN_VALID_SNAPPY   = [4]byte{0x01, 0x00, 0x00, 0x00}
 )
 
-func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, opts ...pubsub.PubOpt) error {
+func PublishTopic(ctx context.Context, log logger.Logger, topicHandle *pubsub.Topic, data []byte, opts ...pubsub.PubOpt) error {
 	// Publish the message to the topic, retrying until we have peers to send the message to
 	// or the context is cancelled
 	start := time.Now()
 	lastLogTime := time.Now()
 	waitTime := 1 * time.Second // Wait briefly for peers, but beacon nodes might not subscribe without validators
-	
+
 	for {
 		topicPeers := topicHandle.ListPeers()
 		if len(topicPeers) > 0 {
 			// Log list of peers we are sending the message to
-			debugFields := logrus.Fields{
+			debugFields := map[string]interface{}{
 				"topic":       topicHandle.String(),
 				"data-length": len(data),
 				"peer_count":  len(topicPeers),
@@ -41,26 +41,26 @@ func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, o
 			for i, peer := range topicPeers {
 				debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
 			}
-			logrus.WithFields(debugFields).Debug("sending message to peers")
+			log.WithFields(debugFields).Debug("sending message to peers")
 			return topicHandle.Publish(ctx, data, opts...)
 		}
-		
+
 		// Log every 100ms if we're still waiting
 		if time.Since(lastLogTime) > 100*time.Millisecond {
-			logrus.WithFields(logrus.Fields{
-				"topic": topicHandle.String(),
+			log.WithFields(map[string]interface{}{
+				"topic":            topicHandle.String(),
 				"waiting_duration": time.Since(start).String(),
-				"topic_peers": len(topicPeers),
+				"topic_peers":      len(topicPeers),
 			}).Debug("Still waiting for peers to appear in topic")
 			lastLogTime = time.Now()
 		}
-		
+
 		// If we've waited long enough, try publishing anyway
 		// Beacon nodes might not subscribe to topics unless they have validators
 		// But with flood publishing enabled, the message might still reach them
 		if time.Since(start) > waitTime {
-			logrus.WithFields(logrus.Fields{
-				"topic": topicHandle.String(),
+			log.WithFields(map[string]interface{}{
+				"topic":  topicHandle.String(),
 				"waited": time.Since(start).String(),
 			}).Warn("No peers subscribed to topic - beacon nodes may not subscribe without active validators. Attempting flood publish.")
 			// Try to publish anyway - with flood publishing enabled, it will reach all connected peers
@@ -68,10 +68,10 @@ func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, o
 			if err != nil {
 				return errors.Wrap(err, "failed to publish even with flood mode")
 			}
-			logrus.Info("Successfully published message via flood mode despite no topic subscribers")
+			log.Info("Successfully published message via flood mode despite no topic subscribers")
 			return nil
 		}
-		
+
 		select {
 		case <-ctx.Done():
 			return errors.Wrapf(ctx.Err(), "topic list of peers was always empty for topic %s, waited for %s", topicHandle.String(), time.Since(start))
@@ -105,7 +105,7 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[stri
 	// Use a longer timeout to account for topic subscription and mesh formation
 	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	
+
 	// First check if we're connected
 	connCheckCtx, connCancel := context.WithTimeout(ctx, time.Second)
 	defer connCancel()
@@ -114,10 +114,10 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[stri
 	}
 
 	topic := signedBeaconBlockToTopic(p.state.GetForkDigest(), sszNetworkEncoder.ProtocolSuffix())
-	
-	logrus.WithFields(logrus.Fields{
-		"topic": topic,
-		"fork_digest": fmt.Sprintf("%x", p.state.GetForkDigest()),
+
+	p.logger.WithFields(map[string]interface{}{
+		"topic":           topic,
+		"fork_digest":     fmt.Sprintf("%x", p.state.GetForkDigest()),
 		"protocol_suffix": sszNetworkEncoder.ProtocolSuffix(),
 	}).Debug("Broadcasting to beacon block topic")
 
@@ -137,7 +137,7 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[stri
 	if err != nil {
 		return errors.Wrap(err, "failed to compute block root")
 	}
-	debugFields := logrus.Fields{
+	debugFields := map[string]interface{}{
 		"id":         p.ID,
 		"topic":      topic,
 		"block_root": fmt.Sprintf("%x", blockRoot),
@@ -151,14 +151,14 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[stri
 		debugFields[fmt.Sprintf("blob_kzg_commitment_%d", i)] = blobKzg.String()
 	}
 
-	logrus.WithFields(debugFields).Debug("Broadcasting signed beacon block deneb")
+	p.logger.WithFields(debugFields).Debug("Broadcasting signed beacon block deneb")
 
-	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
-		debugFields := logrus.Fields{}
+	if err := PublishTopic(timeoutCtx, p.logger, topicHandle, buf); err != nil {
+		debugFields := map[string]interface{}{}
 		for i, peer := range p.Host.Network().Peers() {
 			debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
 		}
-		logrus.WithFields(debugFields).Debug("connected network peers")
+		p.logger.WithFields(debugFields).Debug("connected network peers")
 		return errors.Wrap(err, "failed to publish topic")
 	}
 	return nil
@@ -177,7 +177,7 @@ func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]int
 	// Use a longer timeout to account for topic subscription and mesh formation
 	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	
+
 	// First check if we're connected
 	connCheckCtx, connCancel := context.WithTimeout(ctx, time.Second)
 	defer connCancel()
@@ -187,8 +187,10 @@ func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]int
 
 	if subnet == nil {
 		// By default broadcast to the blob subnet of the index of the sidecar
-		// TODO: This is not entirely correct, this is only correct because the
-		//       subnet count is equal to the max blob sidecar count.
+		// According to the spec, blob subnet is calculated as:
+		// subnet_id = blob_sidecar.index % BLOB_SIDECAR_SUBNET_COUNT
+		// For now, BLOB_SIDECAR_SUBNET_COUNT == MAX_BLOBS_PER_BLOCK (6)
+		// so using the index directly is correct
 		index := uint64(blobSidecar.Index)
 		subnet = &index
 	}
@@ -212,7 +214,7 @@ func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]int
 	if err != nil {
 		return errors.Wrap(err, "failed to compute block root")
 	}
-	logrus.WithFields(logrus.Fields{
+	p.logger.WithFields(map[string]interface{}{
 		"id":             p.ID,
 		"topic":          topic,
 		"block_root":     fmt.Sprintf("%x", blockRoot),
@@ -222,12 +224,12 @@ func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]int
 		"message_id":     fmt.Sprintf("%x", messageID),
 	}).Debug("Broadcasting blob sidecar with signed block header")
 
-	if err := PublishTopic(timeoutCtx, topicHandle, buf); err != nil {
-		debugFields := logrus.Fields{}
+	if err := PublishTopic(timeoutCtx, p.logger, topicHandle, buf); err != nil {
+		debugFields := map[string]interface{}{}
 		for i, peer := range p.Host.Network().Peers() {
 			debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
 		}
-		logrus.WithFields(debugFields).Debug("connected network peers")
+		p.logger.WithFields(debugFields).Debug("connected network peers")
 		return errors.Wrap(err, "failed to publish topic")
 	}
 	return nil

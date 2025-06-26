@@ -13,9 +13,9 @@ import (
 
 // StateValidatorsResponse represents the response from the state validators endpoint
 type StateValidatorsResponse struct {
-	ExecutionOptimistic bool                 `json:"execution_optimistic"`
-	Finalized           bool                 `json:"finalized"`
-	Data                []ValidatorResponse  `json:"data"`
+	ExecutionOptimistic bool                `json:"execution_optimistic"`
+	Finalized           bool                `json:"finalized"`
+	Data                []ValidatorResponse `json:"data"`
 }
 
 // GetStateValidators queries the beacon node for validators

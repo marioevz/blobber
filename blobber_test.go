@@ -5,11 +5,11 @@ import (
 	_ "embed"
 	"testing"
 
+	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
+	"github.com/attestantio/go-eth2-client/spec/deneb"
 	geth_common "github.com/ethereum/go-ethereum/common"
 	"github.com/marioevz/blobber"
 	"github.com/marioevz/blobber/proposal_actions"
-	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
-	"github.com/attestantio/go-eth2-client/spec/deneb"
 )
 
 //go:embed proposal_actions/response_deneb.json
@@ -32,7 +32,7 @@ func TestResponseParse(t *testing.T) {
 	if denebBlock == nil {
 		t.Fatal("deneb block is nil")
 	}
-	
+
 	blockRoot, err := denebBlock.Block.HashTreeRoot()
 	if err != nil {
 		t.Fatal(err)

@@ -179,7 +179,7 @@ func WithSpec(spec map[string]interface{}) Option {
 			cfg.Spec = spec
 			return nil
 		},
-		Description: "WithSpec", // TODO: actually format the spec
+		Description: fmt.Sprintf("WithSpec(%d keys)", len(spec)),
 	}
 }
 
