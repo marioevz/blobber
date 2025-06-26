@@ -5,8 +5,10 @@ import (
 	"crypto/ecdsa"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -119,6 +121,10 @@ type TestPeer struct {
 	cancel   context.CancelFunc
 	MetaData *Metadata
 	state    *Status
+	
+	// Topic management
+	topicHandles map[string]*pubsub.Topic
+	topicMutex   sync.RWMutex
 }
 
 type TestPeers []*TestPeer
@@ -165,16 +171,43 @@ func ConvertFromInterfacePrivKey(privkey crypto.PrivKey) (*ecdsa.PrivateKey, err
 
 func (t *TestP2P) GetTestPeer(ctx context.Context, count int) (TestPeers, error) {
 	var testPeers TestPeers
+	
+	logrus.WithFields(logrus.Fields{
+		"count": count,
+		"has_last_peer": t.lastTestPeer != nil,
+		"test_peer_uses": t.testPeerUses,
+		"max_reuses": t.MaxDevP2PSessionReuses,
+	}).Debug("GetTestPeer called")
 
 	if t.lastTestPeer != nil {
-		if (t.MaxDevP2PSessionReuses > 0 && t.testPeerUses >= t.MaxDevP2PSessionReuses) || len(t.lastTestPeer) != count {
-			// Close the last one
-			t.lastTestPeer.Close()
-			t.lastTestPeer = nil
-			t.testPeerUses = 0
-		} else {
+		// Check if we should reuse or if the count changed
+		shouldReuse := t.MaxDevP2PSessionReuses == 0 || t.testPeerUses < t.MaxDevP2PSessionReuses
+		sameCount := len(t.lastTestPeer) == count
+		
+		// Also check if peers are still connected
+		allConnected := true
+		if shouldReuse && sameCount {
+			for _, tp := range t.lastTestPeer {
+				peerCount := len(tp.Host.Network().Peers())
+				if peerCount == 0 {
+					logrus.WithFields(logrus.Fields{
+						"peer_id": tp.Host.ID().String(),
+						"peer_count": peerCount,
+					}).Debug("Test peer has no connections, will create new peer")
+					allConnected = false
+					break
+				}
+			}
+		}
+		
+		if shouldReuse && sameCount && allConnected {
 			testPeers = t.lastTestPeer
 			t.testPeerUses++
+		} else {
+			// Close the last one
+			t.lastTestPeer.Close(context.Background())
+			t.lastTestPeer = nil
+			t.testPeerUses = 0
 		}
 	}
 
@@ -185,7 +218,7 @@ func (t *TestP2P) GetTestPeer(ctx context.Context, count int) (TestPeers, error)
 			testPeer, err := t.NewTestPeer(ctx, t.BeaconPortStart+int64(i))
 			if err != nil {
 				// close the ones we actually created
-				testPeers.Close()
+				testPeers.Close(context.Background())
 				return nil, errors.Wrap(err, "failed to create p2p")
 			}
 			testPeers = append(testPeers, testPeer)
@@ -259,11 +292,12 @@ func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error
 
 		state: t.ChainStatus,
 
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:          ctx,
+		cancel:       cancel,
+		topicHandles: make(map[string]*pubsub.Topic),
 	}
-	if err := testPeer.SetupStreams(); err != nil {
-		testPeer.Close()
+	if err := testPeer.SetupStreams(context.Background()); err != nil {
+		testPeer.Close(context.Background())
 		return nil, err
 	}
 	return testPeer, nil
@@ -278,9 +312,19 @@ func (p *TestPeer) Connect(ctx context.Context, peer *BeaconClientPeer) error {
 		// Already connected, nothing to do
 		return nil
 	}
-	if err := p.Host.Connect(p.ctx, *peerAddrInfo); err != nil {
+	if err := p.Host.Connect(ctx, *peerAddrInfo); err != nil {
 		return errors.Wrap(err, "could not connect to peer")
 	}
+
+	// Set up disconnect notification
+	p.Host.Network().Notify(&network.NotifyBundle{
+		DisconnectedF: func(n network.Network, c network.Conn) {
+			logrus.WithFields(logrus.Fields{
+				"peer": c.RemotePeer().String(),
+				"local": c.LocalPeer().String(),
+			}).Debug("Peer disconnected")
+		},
+	})
 
 	p.Host.Peerstore().AddProtocols(peerAddrInfo.ID, StatusProtocolID, GoodbyeProtocolID, PingProtocolID, MetaDataProtocolID)
 
@@ -316,6 +360,10 @@ func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 		"head_slot":       fmt.Sprintf("%d", p.state.HeadSlot),
 	}).Debug("Sending initial status")
 
+	// Send response code first
+	if _, err := s.Write([]byte{0x00}); err != nil {
+		return errors.Wrap(err, "failed to write response code")
+	}
 	// Send request
 	if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(p.state.StatusData)); err != nil {
 		return errors.Wrap(err, "failed to encode outgoing message")
@@ -325,10 +373,57 @@ func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 		return errors.Wrap(err, "failed to close+write")
 	}
 
+	// Read the status response from the peer
+	// First read the response code
+	responseByte := make([]byte, 1)
+	if _, err := io.ReadFull(s, responseByte); err != nil {
+		logrus.WithError(err).Warn("Failed to read response code")
+		// Don't fail here - some nodes might not respond properly
+	} else if responseByte[0] != 0x00 {
+		logrus.WithField("code", fmt.Sprintf("0x%02x", responseByte[0])).Warn("Received non-success response code")
+	} else {
+		// Read the actual status message
+		var status StatusData
+		if err := sszNetworkEncoder.DecodeWithMaxLength(s, &status); err != nil {
+			logrus.WithError(err).Warn("Failed to decode status response from peer")
+		} else {
+			// Check if fork digests match
+			if status.ForkDigest != p.state.ForkDigest {
+				logrus.WithFields(logrus.Fields{
+					"our_fork_digest":  fmt.Sprintf("%x", p.state.ForkDigest),
+					"peer_fork_digest": fmt.Sprintf("%x", status.ForkDigest),
+				}).Warn("Fork digest mismatch with peer")
+			}
+			logrus.WithFields(logrus.Fields{
+				"our_fork_digest":      fmt.Sprintf("%x", p.state.ForkDigest),
+				"peer_fork_digest":     fmt.Sprintf("%x", status.ForkDigest),
+				"peer_finalized_root":  status.FinalizedRoot.String(),
+				"peer_finalized_epoch": fmt.Sprintf("%d", status.FinalizedEpoch),
+				"peer_head_root":       status.HeadRoot.String(),
+				"peer_head_slot":       fmt.Sprintf("%d", status.HeadSlot),
+			}).Debug("Received status response from peer")
+		}
+	}
+
+	// Close the stream properly
+	if err := s.Close(); err != nil {
+		logrus.WithError(err).Debug("Failed to close status stream")
+	}
+
 	return nil
 }
 
-func (p *TestPeer) Close() error {
+func (p *TestPeer) Close(ctx context.Context) error {
+	// Close all topic handles
+	p.topicMutex.Lock()
+	for topic, handle := range p.topicHandles {
+		if err := handle.Close(); err != nil {
+			logrus.WithError(err).WithField("topic", topic).Error("Failed to close topic handle")
+		}
+	}
+	p.topicHandles = make(map[string]*pubsub.Topic)
+	p.topicMutex.Unlock()
+	
 	// Send goodbye to each peer
 	peers := p.Host.Network().Peers()
 	if len(peers) > 0 {
@@ -342,9 +437,9 @@ func (p *TestPeer) Close() error {
 	return p.Host.Close()
 }
 
-func (pl TestPeers) Close() error {
+func (pl TestPeers) Close(ctx context.Context) error {
 	for _, p := range pl {
-		if err := p.Close(); err != nil {
+		if err := p.Close(ctx); err != nil {
 			return err
 		}
 	}
@@ -364,7 +459,7 @@ func (p *TestPeer) WaitForP2PConnection(ctx context.Context) error {
 	}
 }
 
-func (p *TestPeer) SetupStreams() error {
+func (p *TestPeer) SetupStreams(ctx context.Context) error {
 	// Prepare stream responses for the basic Req/Resp protocols.
 
 	// Status
@@ -423,8 +518,10 @@ func (p *TestPeer) SetupStreams() error {
 		} else {
 			logrus.WithField("bytes", n).Debug("Sent data")
 		}
+		// Try to close the stream, but don't worry if it fails (might already be closed)
 		if err := s.Close(); err != nil {
-			logrus.WithError(err).Error("Failed to close stream")
+			// Only log as debug since this often happens when peer closes first
+			logrus.WithError(err).Debug("Stream close error (expected if peer closed first)")
 			return
 		}
 	})
@@ -554,6 +651,58 @@ func (p *TestPeer) SetupStreams() error {
 	})
 
 	return nil
+}
+
+// GetOrJoinTopic returns an existing topic handle or creates a new one
+func (p *TestPeer) GetOrJoinTopic(topic string, opts ...pubsub.TopicOpt) (*pubsub.Topic, error) {
+	p.topicMutex.Lock()
+	defer p.topicMutex.Unlock()
+
+	// Check if we already have this topic
+	if handle, exists := p.topicHandles[topic]; exists {
+		return handle, nil
+	}
+
+	// Join the topic
+	handle, err := p.PubSub.Join(topic, opts...)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to join topic")
+	}
+
+	// Subscribe to the topic to join the gossip mesh
+	// This is necessary for peers to see us in their topic peer list
+	sub, err := handle.Subscribe()
+	if err != nil {
+		handle.Close()
+		return nil, errors.Wrap(err, "failed to subscribe to topic")
+	}
+	
+	// We need to keep the subscription alive but we're not actually reading messages
+	// Start a goroutine to consume messages (and discard them)
+	go func() {
+		ctx := p.ctx
+		for {
+			_, err := sub.Next(ctx)
+			if err != nil {
+				// Context cancelled or subscription closed
+				return
+			}
+			// We're just discarding messages since we're only broadcasting
+		}
+	}()
+
+	// Store the handle
+	p.topicHandles[topic] = handle
+	
+	logrus.WithFields(logrus.Fields{
+		"topic": topic,
+		"peer_id": p.Host.ID().String(),
+	}).Debug("Successfully joined and subscribed to topic")
+	
+	// Give the gossip mesh a moment to stabilize after subscription
+	time.Sleep(50 * time.Millisecond)
+	
+	return handle, nil
 }
 
 func (p *TestPeer) Goodbye(ctx context.Context, peer peer.ID) error {

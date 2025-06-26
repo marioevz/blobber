@@ -9,9 +9,9 @@ import (
 
 	"github.com/golang/snappy"
 
+	"github.com/attestantio/go-eth2-client/spec/deneb"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
-	"github.com/attestantio/go-eth2-client/spec/deneb"
 	"github.com/pkg/errors"
 	fastssz "github.com/prysmaticlabs/fastssz"
 	"github.com/sirupsen/logrus"
@@ -26,22 +26,35 @@ func PublishTopic(ctx context.Context, topicHandle *pubsub.Topic, data []byte, o
 	// Publish the message to the topic, retrying until we have peers to send the message to
 	// or the context is cancelled
 	start := time.Now()
+	lastLogTime := time.Now()
 	for {
-		if len(topicHandle.ListPeers()) > 0 {
+		topicPeers := topicHandle.ListPeers()
+		if len(topicPeers) > 0 {
 			// Log list of peers we are sending the message to
 			debugFields := logrus.Fields{
 				"topic":       topicHandle.String(),
 				"data-length": len(data),
+				"peer_count":  len(topicPeers),
 			}
-			for i, peer := range topicHandle.ListPeers() {
+			for i, peer := range topicPeers {
 				debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
 			}
 			logrus.WithFields(debugFields).Debug("sending message to peers")
 			return topicHandle.Publish(ctx, data, opts...)
 		}
+		
+		// Log every 100ms if we're still waiting
+		if time.Since(lastLogTime) > 100*time.Millisecond {
+			logrus.WithFields(logrus.Fields{
+				"topic": topicHandle.String(),
+				"waiting_duration": time.Since(start).String(),
+			}).Debug("Still waiting for peers to appear in topic")
+			lastLogTime = time.Now()
+		}
+		
 		select {
 		case <-ctx.Done():
-			return errors.Wrapf(ctx.Err(), "topic list of peers was always empty, waited for %s", time.Since(start))
+			return errors.Wrapf(ctx.Err(), "topic list of peers was always empty for topic %s, waited for %s", topicHandle.String(), time.Since(start))
 		case <-time.After(1 * time.Millisecond):
 		}
 	}
@@ -68,8 +81,8 @@ func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, []byte, error) {
 	return b, s.Sum(nil)[:20], nil
 }
 
-func (p *TestPeer) BroadcastSignedBeaconBlock(spec map[string]interface{}, signedBeaconBlock *deneb.SignedBeaconBlock) error {
-	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
+func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[string]interface{}, signedBeaconBlock *deneb.SignedBeaconBlock) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
 		return errors.Wrap(err, "failed to wait for p2p connection")
@@ -82,13 +95,13 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(spec map[string]interface{}, signe
 		return errors.Wrap(err, "failed to encode signed beacon block deneb")
 	}
 
-	topicHandle, err := p.PubSub.Join(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
+	topicHandle, err := p.GetOrJoinTopic(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
 		return string(messageID)
 	}))
 	if err != nil {
-		return errors.Wrap(err, "failed to join topic")
+		return errors.Wrap(err, "failed to get or join topic")
 	}
-	defer topicHandle.Close()
+	// Don't close the topic handle here - it's managed by TestPeer now
 	blockRoot, err := signedBeaconBlock.Message.HashTreeRoot()
 	if err != nil {
 		return errors.Wrap(err, "failed to compute block root")
@@ -120,17 +133,17 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(spec map[string]interface{}, signe
 	return nil
 }
 
-func (p TestPeers) BroadcastSignedBeaconBlock(spec map[string]interface{}, signedBeaconBlockDeneb *deneb.SignedBeaconBlock) error {
+func (p TestPeers) BroadcastSignedBeaconBlock(ctx context.Context, spec map[string]interface{}, signedBeaconBlockDeneb *deneb.SignedBeaconBlock) error {
 	for _, p2p := range p {
-		if err := p2p.BroadcastSignedBeaconBlock(spec, signedBeaconBlockDeneb); err != nil {
+		if err := p2p.BroadcastSignedBeaconBlock(ctx, spec, signedBeaconBlockDeneb); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (p *TestPeer) BroadcastBlobSidecar(spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
-	timeoutCtx, cancel := context.WithTimeout(p.ctx, time.Second)
+func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	if err := p.WaitForP2PConnection(timeoutCtx); err != nil {
 		return errors.Wrap(err, "failed to wait for p2p connection")
@@ -151,13 +164,13 @@ func (p *TestPeer) BroadcastBlobSidecar(spec map[string]interface{}, blobSidecar
 		return errors.Wrap(err, "failed to encode signed blob sidecar")
 	}
 
-	topicHandle, err := p.PubSub.Join(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
+	topicHandle, err := p.GetOrJoinTopic(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
 		return string(messageID)
 	}))
 	if err != nil {
-		return errors.Wrap(err, "failed to join topic")
+		return errors.Wrap(err, "failed to get or join topic")
 	}
-	defer topicHandle.Close()
+	// Don't close the topic handle here - it's managed by TestPeer now
 
 	blockRoot, err := blobSidecar.SignedBlockHeader.Message.HashTreeRoot()
 	if err != nil {
@@ -184,27 +197,27 @@ func (p *TestPeer) BroadcastBlobSidecar(spec map[string]interface{}, blobSidecar
 	return nil
 }
 
-func (p *TestPeer) BroadcastBlobSidecars(spec map[string]interface{}, blobSidecars ...*deneb.BlobSidecar) error {
+func (p *TestPeer) BroadcastBlobSidecars(ctx context.Context, spec map[string]interface{}, blobSidecars ...*deneb.BlobSidecar) error {
 	for _, blobSidecar := range blobSidecars {
-		if err := p.BroadcastBlobSidecar(spec, blobSidecar, nil); err != nil {
+		if err := p.BroadcastBlobSidecar(ctx, spec, blobSidecar, nil); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (p TestPeers) BroadcastBlobSidecar(spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
+func (p TestPeers) BroadcastBlobSidecar(ctx context.Context, spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
 	for _, p2p := range p {
-		if err := p2p.BroadcastBlobSidecar(spec, blobSidecar, subnet); err != nil {
+		if err := p2p.BroadcastBlobSidecar(ctx, spec, blobSidecar, subnet); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (p TestPeers) BroadcastBlobSidecars(spec map[string]interface{}, blobSidecars ...*deneb.BlobSidecar) error {
+func (p TestPeers) BroadcastBlobSidecars(ctx context.Context, spec map[string]interface{}, blobSidecars ...*deneb.BlobSidecar) error {
 	for _, p2p := range p {
-		if err := p2p.BroadcastBlobSidecars(spec, blobSidecars...); err != nil {
+		if err := p2p.BroadcastBlobSidecars(ctx, spec, blobSidecars...); err != nil {
 			return err
 		}
 	}
