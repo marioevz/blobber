@@ -21,14 +21,28 @@ import (
 	"github.com/marioevz/blobber/proposal_actions"
 )
 
+// Build-time variables injected via ldflags
+var (
+	gitCommit = "unknown"
+	buildDate = "unknown"
+)
+
 func init() {
+	// Skip banner if help is requested
+	for _, arg := range os.Args[1:] {
+		if arg == "-h" || arg == "--help" || arg == "-help" || arg == "help" {
+			return
+		}
+	}
+	
 	// Use stderr to ensure this is visible
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "########################################")
-	fmt.Fprintln(os.Stderr, "# BLOBBER INIT (refactor-v7-json-fix) #")
+	fmt.Fprintf(os.Stderr, "# BLOBBER INIT (%s) #\n", gitCommit)
 	fmt.Fprintln(os.Stderr, "########################################")
 	fmt.Fprintf(os.Stderr, "# Binary: %s\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "# Args: %v\n", os.Args[1:])
+	fmt.Fprintf(os.Stderr, "# Build Date: %s\n", buildDate)
 	fmt.Fprintln(os.Stderr, "########################################")
 	fmt.Fprintln(os.Stderr, "")
 }
@@ -68,32 +82,60 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
+func printUsage() {
+	fmt.Fprintf(os.Stderr, `Blobber - Beacon Chain DevP2P Blob Testing Proxy
+Version: %s (built: %s)
+
+WARNING: This tool can cause validator SLASHING. Never use on Mainnet!
+
+USAGE:
+  blobber [options]
+
+DESCRIPTION:
+  Blobber acts as a proxy between beacon and validator clients to intercept,
+  modify, delay, or corrupt blob sidecars for testing purposes.
+
+OPTIONS:
+`, gitCommit, buildDate)
+	
+	flag.PrintDefaults()
+	
+	fmt.Fprintf(os.Stderr, `
+EXAMPLES:
+  # Basic usage with one beacon client
+  blobber --cl http://beacon:4000 --validator-key-file keys.txt --enable-unsafe-mode
+
+  # Multiple beacon clients with blob gossip delay
+  blobber --cl http://beacon1:4000 --cl http://beacon2:4000 \
+    --validator-key-folder /path/to/keys \
+    --proposal-action '{"name": "blob_gossip_delay", "delay_milliseconds": 1000}' \
+    --enable-unsafe-mode
+
+  # With non-validating clients
+  blobber --cl http://validator-beacon:4000 \
+    --cl-non-validating http://observer-beacon:4000 \
+    --validator-key-file keys.txt \
+    --enable-unsafe-mode
+
+PROPOSAL ACTIONS:
+  Available actions (use with --proposal-action):
+  - default: Standard block and blob broadcasting
+  - blob_gossip_delay: Delay blob broadcasting by specified milliseconds
+  - equivocating_blob_sidecars: Create equivocating blob sidecars
+  - invalid_equivocating_block_and_blobs: Broadcast different blocks/blobs to different peers
+  - equivocating_block_header_in_blobs: Use equivocating block header in blob sidecars
+  - invalid_equivocating_block: Broadcast equivocating blocks
+
+  See proposal_actions/README.md for detailed documentation.
+
+SAFETY:
+  You MUST use --enable-unsafe-mode to run this tool. This is a safety measure
+  to prevent accidental usage on production networks.
+`)
+}
+
 func main() {
-	// Log startup - this MUST appear if the new binary is being used
-	fmt.Fprintf(os.Stderr, "=== BLOBBER STARTING (v7-json-fix) ===\n")
-	fmt.Fprintf(os.Stderr, "Version: refactor-v7-json-fix\n")
-	fmt.Fprintf(os.Stderr, "Args (%d): %v\n", len(os.Args), os.Args)
-	fmt.Fprintf(os.Stderr, "Working directory: %s\n", mustGetwd())
-
-	// Check if proposal action args are present
-	hasProposalAction := false
-	hasFrequency := false
-	for _, arg := range os.Args[1:] {
-		if strings.HasPrefix(arg, "--proposal-action=") || strings.HasPrefix(arg, "-proposal-action=") {
-			hasProposalAction = true
-			fmt.Fprintf(os.Stderr, "Found proposal-action arg: %s\n", arg)
-		}
-		if strings.HasPrefix(arg, "--proposal-action-frequency=") || strings.HasPrefix(arg, "-proposal-action-frequency=") {
-			hasFrequency = true
-			fmt.Fprintf(os.Stderr, "Found proposal-action-frequency arg: %s\n", arg)
-		}
-	}
-
-	if !hasProposalAction && !hasFrequency {
-		fmt.Fprintf(os.Stderr, "WARNING: No proposal action arguments found in command line!\n")
-		fmt.Fprintf(os.Stderr, "This suggests blobber_extra_params are not being passed from Kurtosis.\n")
-	}
-
+	// Define all flags first
 	var (
 		clEndpoints                       arrayFlags
 		nonValidatingClEndpoints          arrayFlags
@@ -112,6 +154,9 @@ func main() {
 		blobberID                         uint64
 		unsafeMode                        bool
 	)
+
+	// Set custom usage function
+	flag.Usage = printUsage
 
 	flag.Var(
 		&clEndpoints,
@@ -208,13 +253,47 @@ func main() {
 		"Enable unsafe mode, only use this if you know what you're doing and never attempt to run this tool on mainnet.",
 	)
 
-	fmt.Println("=== PARSING FLAGS ===")
-	fmt.Fprintf(os.Stderr, "=== PARSING FLAGS ===\n")
+	// Parse flags
 	err := flag.CommandLine.Parse(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: Failed to parse flags: %v\n", err)
-		panic(err)
+		os.Exit(1)
 	}
+
+	// Check for help flag after parsing (this catches -h and --help)
+	if flag.CommandLine.Parsed() && (flag.CommandLine.NArg() > 0 && flag.CommandLine.Arg(0) == "help") {
+		printUsage()
+		os.Exit(0)
+	}
+
+	// Log startup - this MUST appear if the new binary is being used
+	fmt.Fprintf(os.Stderr, "=== BLOBBER STARTING ===\n")
+	fmt.Fprintf(os.Stderr, "Git Commit: %s\n", gitCommit)
+	fmt.Fprintf(os.Stderr, "Build Date: %s\n", buildDate)
+	fmt.Fprintf(os.Stderr, "Args (%d): %v\n", len(os.Args), os.Args)
+	fmt.Fprintf(os.Stderr, "Working directory: %s\n", mustGetwd())
+
+	// Check if proposal action args are present
+	hasProposalAction := false
+	hasFrequency := false
+	for _, arg := range os.Args[1:] {
+		if strings.HasPrefix(arg, "--proposal-action=") || strings.HasPrefix(arg, "-proposal-action=") {
+			hasProposalAction = true
+			fmt.Fprintf(os.Stderr, "Found proposal-action arg: %s\n", arg)
+		}
+		if strings.HasPrefix(arg, "--proposal-action-frequency=") || strings.HasPrefix(arg, "-proposal-action-frequency=") {
+			hasFrequency = true
+			fmt.Fprintf(os.Stderr, "Found proposal-action-frequency arg: %s\n", arg)
+		}
+	}
+
+	if !hasProposalAction && !hasFrequency {
+		fmt.Fprintf(os.Stderr, "WARNING: No proposal action arguments found in command line!\n")
+		fmt.Fprintf(os.Stderr, "This suggests blobber_extra_params are not being passed from Kurtosis.\n")
+	}
+
+	fmt.Println("=== PARSING FLAGS ===")
+	fmt.Fprintf(os.Stderr, "=== PARSING FLAGS ===\n")
 
 	fmt.Fprintf(os.Stderr, "=== FLAGS PARSED SUCCESSFULLY ===\n")
 	fmt.Fprintf(os.Stderr, "proposalActionJson: '%s'\n", proposalActionJson)

@@ -2,16 +2,17 @@ FROM golang:1.21.7-bullseye as builder
 
 # Override the default value of GOOS when building the Docker image using the --build-arg flag
 ARG GOOS=linux
-
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
 
 WORKDIR /build
 # Copy the code into the container
 COPY . .
 RUN go mod download
 
-# Build the application statically
-RUN echo "Building blobber v7 with JSON fix..." && \
-    GOOS=${GOOS} go build -o blobber.bin ./cmd/blobber.go && \
+# Build the application statically with version info
+RUN echo "Building blobber with commit ${GIT_COMMIT}..." && \
+    GOOS=${GOOS} go build -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.buildDate=${BUILD_DATE}" -o blobber.bin ./cmd/blobber.go && \
     echo "Build complete, binary size:" && \
     ls -la blobber.bin
 
