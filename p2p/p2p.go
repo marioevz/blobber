@@ -126,8 +126,9 @@ type TestPeer struct {
 	state    *Status
 
 	// Topic management
-	topicHandles map[string]*pubsub.Topic
-	topicMutex   sync.RWMutex
+	topicHandles       map[string]*pubsub.Topic
+	topicSubscriptions map[string]*pubsub.Subscription
+	topicMutex         sync.RWMutex
 
 	// Logger
 	logger logger.Logger
@@ -307,10 +308,11 @@ func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error
 
 		state: t.ChainStatus,
 
-		ctx:          ctx,
-		cancel:       cancel,
-		topicHandles: make(map[string]*pubsub.Topic),
-		logger:       t.logger,
+		ctx:                ctx,
+		cancel:             cancel,
+		topicHandles:       make(map[string]*pubsub.Topic),
+		topicSubscriptions: make(map[string]*pubsub.Subscription),
+		logger:             t.logger,
 	}
 	if err := testPeer.SetupStreams(context.Background()); err != nil {
 		_ = testPeer.Close(context.Background())
@@ -461,6 +463,16 @@ func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {
 func (p *TestPeer) Close(ctx context.Context) error {
 	// Close all topic handles
 	p.topicMutex.Lock()
+	// First cancel all subscriptions
+	for topic, sub := range p.topicSubscriptions {
+		sub.Cancel()
+		if p.logger != nil {
+			p.logger.WithField("topic", topic).Debug("Canceled topic subscription")
+		}
+	}
+	// Wait a bit for subscription goroutines to exit
+	time.Sleep(100 * time.Millisecond)
+	// Now close topic handles
 	for topic, handle := range p.topicHandles {
 		if err := handle.Close(); err != nil {
 			if p.logger != nil {
@@ -472,6 +484,7 @@ func (p *TestPeer) Close(ctx context.Context) error {
 		}
 	}
 	p.topicHandles = make(map[string]*pubsub.Topic)
+	p.topicSubscriptions = make(map[string]*pubsub.Subscription)
 	p.topicMutex.Unlock()
 
 	// Send goodbye to each peer
@@ -809,8 +822,12 @@ func (p *TestPeer) GetOrJoinTopic(topic string, opts ...pubsub.TopicOpt) (*pubsu
 		}
 	}()
 
-	// Store the handle
+	// Store the handle and subscription
 	p.topicHandles[topic] = handle
+	if p.topicSubscriptions == nil {
+		p.topicSubscriptions = make(map[string]*pubsub.Subscription)
+	}
+	p.topicSubscriptions[topic] = sub
 
 	if p.logger != nil {
 		p.logger.WithFields(map[string]interface{}{

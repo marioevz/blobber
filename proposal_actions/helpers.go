@@ -278,6 +278,12 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 		return errors.New("peers and bundles must have the same length")
 	}
 
+	// If there's a delay configured, apply it BEFORE establishing any P2P connections
+	// This ensures we don't hold connections open during the delay period
+	if b.DelayMilliseconds > 0 {
+		time.Sleep(time.Duration(b.DelayMilliseconds) * time.Millisecond)
+	}
+
 	broadcastBlobs := func(testPeer *p2p.TestPeer, blobs []*deneb.BlobSidecar) error {
 		for i, blob := range blobs {
 			if err := testPeer.BroadcastBlobSidecar(context.Background(), b.Spec, blob, nil); err != nil {
@@ -304,9 +310,6 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 				errs <- err
 				return
 			}
-			if b.DelayMilliseconds > 0 {
-				time.Sleep(time.Duration(b.DelayMilliseconds) * time.Millisecond)
-			}
 			if err := broadcastBlock(testPeer, bundle.SignedBlock); err != nil {
 				errs <- err
 				return
@@ -315,9 +318,6 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 			if err := broadcastBlock(testPeer, bundle.SignedBlock); err != nil {
 				errs <- err
 				return
-			}
-			if b.DelayMilliseconds > 0 {
-				time.Sleep(time.Duration(b.DelayMilliseconds) * time.Millisecond)
 			}
 			if err := broadcastBlobs(testPeer, bundle.BlobSidecars); err != nil {
 				errs <- err
