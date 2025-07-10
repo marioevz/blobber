@@ -2,6 +2,7 @@ package keys
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,7 +29,7 @@ func (vk *ValidatorKey) FromBytes(secretKey []byte) error {
 		return fmt.Errorf("invalid secret key length: %d, expected 32", len(secretKey))
 	}
 	vk.ValidatorSecretKey = new(blsu.SecretKey)
-	vk.ValidatorSecretKey.Deserialize((*[32]byte)(secretKey))
+	_ = vk.ValidatorSecretKey.Deserialize((*[32]byte)(secretKey))
 	return vk.FillPubKey()
 }
 
@@ -73,13 +74,13 @@ func (vk *ValidatorKey) PubKeyToHex() string {
 	return hex.EncodeToString(vk.PubKeyToBytes())
 }
 
-func KeyListFromFile(path string) ([]*ValidatorKey, error) {
+func KeyListFromFile(ctx context.Context, path string) ([]*ValidatorKey, error) {
 	// Read file line by line and parse each line as a validator secret key
 	readFile, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %s", err)
 	}
-	defer readFile.Close()
+	defer func() { _ = readFile.Close() }()
 	fileScanner := bufio.NewScanner(readFile)
 
 	fileScanner.Split(bufio.ScanLines)
@@ -98,7 +99,7 @@ func KeyListFromFile(path string) ([]*ValidatorKey, error) {
 	return validatorKeyList, nil
 }
 
-func KeyListFromFolder(pathStr string) ([]*ValidatorKey, error) {
+func KeyListFromFolder(ctx context.Context, pathStr string) ([]*ValidatorKey, error) {
 	// Load keys from a folder that contains a "secrets" and "keys" subdirectories
 	secretsDir := path.Join(pathStr, "secrets")
 	keysDir := path.Join(pathStr, "keys")
@@ -152,7 +153,9 @@ func KeyListFromFolder(pathStr string) ([]*ValidatorKey, error) {
 		}
 
 		validatorKey := new(ValidatorKey)
-		validatorKey.FromBytes(secretKey)
+		if err := validatorKey.FromBytes(secretKey); err != nil {
+			return nil, errors.Wrap(err, "failed to deserialize validator key")
+		}
 
 		logrus.WithFields(
 			logrus.Fields{
