@@ -16,9 +16,9 @@ func ConvertVersionedToDeneb(versioned *VersionedBlockContents) *apiv1deneb.Bloc
 	}
 
 	switch versioned.Version {
-	case "deneb":
+	case VersionDeneb:
 		return versioned.Deneb
-	case "electra":
+	case VersionElectra:
 		// For Electra, we create a Deneb BlockContents with the compatible fields
 		if versioned.Electra != nil {
 			// Convert Electra to Deneb format

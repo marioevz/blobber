@@ -65,7 +65,7 @@ func WithID(id uint64) Option {
 			cfg.Lock()
 			defer cfg.Unlock()
 			cfg.ID = id
-			cfg.TestP2P.InstanceID = id
+			cfg.InstanceID = id
 			return nil
 		},
 		Description: fmt.Sprintf("WithID(%d)", id),
@@ -114,7 +114,7 @@ func WithBeaconPortStart(port int) Option {
 		apply: func(cfg *Config) error {
 			cfg.Lock()
 			defer cfg.Unlock()
-			cfg.TestP2P.BeaconPortStart = int64(port)
+			cfg.BeaconPortStart = int64(port)
 			return nil
 		},
 		Description: fmt.Sprintf("WithBeaconPortStart(%d)", port),

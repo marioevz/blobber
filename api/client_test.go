@@ -68,7 +68,7 @@ func TestGetStateValidators(t *testing.T) {
 	if validator.Balance != "32000000000" {
 		t.Errorf("expected balance 32000000000, got %s", validator.Balance)
 	}
-	if string(validator.Status) != "active_ongoing" {
+	if validator.Status != "active_ongoing" {
 		t.Errorf("expected status active_ongoing, got %s", validator.Status)
 	}
 }

@@ -106,7 +106,7 @@ func NewBlobber(ctx context.Context, log logger.Logger, opts ...config.Option) (
 	log.Info("Applying configuration options...")
 
 	// Apply the options
-	if err := b.Config.Apply(opts...); err != nil {
+	if err := b.Apply(opts...); err != nil {
 		log.Errorf("Failed to apply options: %v", err)
 
 		// Check if this is the specific error we're seeing
@@ -280,8 +280,8 @@ func (b *Blobber) updateStatus(cl *beacon.BeaconClientAdapter) error {
 	}
 
 	// Update the chainstate
-	blockRoot := phase0.Root(block.Root())
-	b.ChainStatus.SetHead(blockRoot, phase0.Slot(block.Slot()))
+	blockRoot := block.Root()
+	b.ChainStatus.SetHead(blockRoot, block.Slot())
 
 	// Update the fork digest
 	forkVersion, err := common.GetForkVersion(b.Spec, block.Slot())
@@ -483,7 +483,7 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon.BeaconClientAdapter, id in
 		}
 
 		// Skip if not Deneb or Electra
-		if blockBlobResponse.Version != "deneb" && blockBlobResponse.Version != "electra" {
+		if blockBlobResponse.Version != common.VersionDeneb && blockBlobResponse.Version != common.VersionElectra {
 			b.logger.WithField("version", blockBlobResponse.Version).Info("Skipping non-blob version")
 			return false, nil
 		}
@@ -570,7 +570,7 @@ func ParseResponse(response []byte) (*common.VersionedBlockContents, error) {
 	decoder := json.NewDecoder(bytes.NewReader(*blockDataStruct.Data))
 
 	switch version {
-	case "deneb":
+	case common.VersionDeneb:
 		data := new(apiv1deneb.BlockContents)
 		if err := decoder.Decode(&data); err != nil {
 			return nil, errors.Wrap(err, "failed to decode deneb block contents")
@@ -580,7 +580,7 @@ func ParseResponse(response []byte) (*common.VersionedBlockContents, error) {
 			Deneb:   data,
 		}, nil
 
-	case "electra":
+	case common.VersionElectra:
 		data := new(apiv1electra.BlockContents)
 		if err := decoder.Decode(&data); err != nil {
 			return nil, errors.Wrap(err, "failed to decode electra block contents")

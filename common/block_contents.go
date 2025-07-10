@@ -8,6 +8,11 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 )
 
+const (
+	VersionDeneb   = "deneb"
+	VersionElectra = "electra"
+)
+
 // VersionedBlockContents represents block contents that can be either Deneb or Electra
 type VersionedBlockContents struct {
 	Version string
@@ -18,11 +23,11 @@ type VersionedBlockContents struct {
 // GetSlot returns the slot of the block
 func (v *VersionedBlockContents) GetSlot() phase0.Slot {
 	switch v.Version {
-	case "deneb":
+	case VersionDeneb:
 		if v.Deneb != nil && v.Deneb.Block != nil {
 			return v.Deneb.Block.Slot
 		}
-	case "electra":
+	case VersionElectra:
 		if v.Electra != nil && v.Electra.Block != nil {
 			return v.Electra.Block.Slot
 		}
@@ -33,11 +38,11 @@ func (v *VersionedBlockContents) GetSlot() phase0.Slot {
 // GetProposerIndex returns the proposer index of the block
 func (v *VersionedBlockContents) GetProposerIndex() phase0.ValidatorIndex {
 	switch v.Version {
-	case "deneb":
+	case VersionDeneb:
 		if v.Deneb != nil && v.Deneb.Block != nil {
 			return v.Deneb.Block.ProposerIndex
 		}
-	case "electra":
+	case VersionElectra:
 		if v.Electra != nil && v.Electra.Block != nil {
 			return v.Electra.Block.ProposerIndex
 		}
@@ -48,11 +53,11 @@ func (v *VersionedBlockContents) GetProposerIndex() phase0.ValidatorIndex {
 // GetBlobsCount returns the number of blobs
 func (v *VersionedBlockContents) GetBlobsCount() int {
 	switch v.Version {
-	case "deneb":
+	case VersionDeneb:
 		if v.Deneb != nil {
 			return len(v.Deneb.Blobs)
 		}
-	case "electra":
+	case VersionElectra:
 		if v.Electra != nil {
 			return len(v.Electra.Blobs)
 		}
@@ -63,11 +68,11 @@ func (v *VersionedBlockContents) GetBlobsCount() int {
 // GetBlobs returns the blobs
 func (v *VersionedBlockContents) GetBlobs() []deneb.Blob {
 	switch v.Version {
-	case "deneb":
+	case VersionDeneb:
 		if v.Deneb != nil {
 			return v.Deneb.Blobs
 		}
-	case "electra":
+	case VersionElectra:
 		if v.Electra != nil {
 			// Electra uses the same blob type as Deneb
 			return v.Electra.Blobs
@@ -79,11 +84,11 @@ func (v *VersionedBlockContents) GetBlobs() []deneb.Blob {
 // GetKZGProofs returns the KZG proofs
 func (v *VersionedBlockContents) GetKZGProofs() []deneb.KZGProof {
 	switch v.Version {
-	case "deneb":
+	case VersionDeneb:
 		if v.Deneb != nil {
 			return v.Deneb.KZGProofs
 		}
-	case "electra":
+	case VersionElectra:
 		if v.Electra != nil {
 			return v.Electra.KZGProofs
 		}
@@ -93,7 +98,7 @@ func (v *VersionedBlockContents) GetKZGProofs() []deneb.KZGProof {
 
 // GetDenebBlock returns the Deneb block if this is a Deneb block
 func (v *VersionedBlockContents) GetDenebBlock() *deneb.BeaconBlock {
-	if v.Version == "deneb" && v.Deneb != nil {
+	if v.Version == VersionDeneb && v.Deneb != nil {
 		return v.Deneb.Block
 	}
 	return nil
@@ -101,7 +106,7 @@ func (v *VersionedBlockContents) GetDenebBlock() *deneb.BeaconBlock {
 
 // GetElectraBlock returns the Electra block if this is an Electra block
 func (v *VersionedBlockContents) GetElectraBlock() *electra.BeaconBlock {
-	if v.Version == "electra" && v.Electra != nil {
+	if v.Version == VersionElectra && v.Electra != nil {
 		return v.Electra.Block
 	}
 	return nil
@@ -110,11 +115,11 @@ func (v *VersionedBlockContents) GetElectraBlock() *electra.BeaconBlock {
 // GetGraffiti returns the graffiti field
 func (v *VersionedBlockContents) GetGraffiti() [32]byte {
 	switch v.Version {
-	case "deneb":
+	case VersionDeneb:
 		if v.Deneb != nil && v.Deneb.Block != nil && v.Deneb.Block.Body != nil {
 			return v.Deneb.Block.Body.Graffiti
 		}
-	case "electra":
+	case VersionElectra:
 		if v.Electra != nil && v.Electra.Block != nil && v.Electra.Block.Body != nil {
 			return v.Electra.Block.Body.Graffiti
 		}
@@ -125,11 +130,11 @@ func (v *VersionedBlockContents) GetGraffiti() [32]byte {
 // SetGraffiti sets the graffiti field
 func (v *VersionedBlockContents) SetGraffiti(graffiti [32]byte) {
 	switch v.Version {
-	case "deneb":
+	case VersionDeneb:
 		if v.Deneb != nil && v.Deneb.Block != nil && v.Deneb.Block.Body != nil {
 			v.Deneb.Block.Body.Graffiti = graffiti
 		}
-	case "electra":
+	case VersionElectra:
 		if v.Electra != nil && v.Electra.Block != nil && v.Electra.Block.Body != nil {
 			v.Electra.Block.Body.Graffiti = graffiti
 		}
@@ -139,11 +144,11 @@ func (v *VersionedBlockContents) SetGraffiti(graffiti [32]byte) {
 // GetBlobKZGCommitments returns the blob KZG commitments
 func (v *VersionedBlockContents) GetBlobKZGCommitments() []deneb.KZGCommitment {
 	switch v.Version {
-	case "deneb":
+	case VersionDeneb:
 		if v.Deneb != nil && v.Deneb.Block != nil && v.Deneb.Block.Body != nil {
 			return v.Deneb.Block.Body.BlobKZGCommitments
 		}
-	case "electra":
+	case VersionElectra:
 		if v.Electra != nil && v.Electra.Block != nil && v.Electra.Block.Body != nil {
 			return v.Electra.Block.Body.BlobKZGCommitments
 		}
