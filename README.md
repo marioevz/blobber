@@ -40,11 +40,32 @@ Testing tool that sits as a proxy between the beacon and validator clients in or
 
 ## Installation
 
+### Using Make (recommended)
+```bash
+git clone https://github.com/marioevz/blobber.git
+cd blobber
+make build
+./blobber --help
+```
+
+### Manual build
 ```bash
 git clone https://github.com/marioevz/blobber.git
 cd blobber
 go build -o blobber ./cmd
 ./blobber --help
+```
+
+Note: The Make build will automatically include git commit hash and build date in the binary.
+
+### Getting Help
+
+To see all available command-line options and usage examples:
+
+```bash
+./blobber --help
+# or
+./blobber -h
 ```
 
 ## Use with Docker

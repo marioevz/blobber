@@ -2,38 +2,62 @@ package proposal_actions
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
+	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
+	"github.com/attestantio/go-eth2-client/spec/deneb"
+	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/pkg/errors"
 	blsu "github.com/protolambda/bls12-381-util"
-	"github.com/protolambda/zrnt/eth2/beacon/common"
-	"github.com/protolambda/zrnt/eth2/beacon/deneb"
-	"github.com/protolambda/ztyp/tree"
 	"github.com/sirupsen/logrus"
 )
 
-func VerifySignature(domain common.BLSDomain, root common.Root, pubKey *blsu.Pubkey, signature common.BLSSignature) (bool, error) {
-	signingRoot := common.ComputeSigningRoot(root, domain)
-	s, err := signature.Signature()
+func VerifySignature(domain phase0.Domain, root phase0.Root, pubKey *blsu.Pubkey, signature phase0.BLSSignature) (bool, error) {
+	// Compute signing root
+	signingData := &phase0.SigningData{
+		ObjectRoot: root,
+		Domain:     domain,
+	}
+	signingRoot, err := signingData.HashTreeRoot()
 	if err != nil {
 		return false, err
 	}
-	return blsu.Verify(pubKey, signingRoot[:], s), nil
+	// BLSSignature in go-eth2-client is a [96]byte array
+	// Convert to blsu.Signature
+	sig := new(blsu.Signature)
+	var sigArray [96]byte
+	copy(sigArray[:], signature[:])
+	if err := sig.Deserialize(&sigArray); err != nil {
+		return false, err
+	}
+	return blsu.Verify(pubKey, signingRoot[:], sig), nil
 }
 
-func SignBlockContents(spec *common.Spec, blockContents *deneb.BlockContents, beaconBlockDomain common.BLSDomain, validatorKey *keys.ValidatorKey) (*deneb.SignedBlockContents, error) {
-	signingRoot := common.ComputeSigningRoot(
-		blockContents.Block.HashTreeRoot(spec, tree.GetHashFn()),
-		beaconBlockDomain,
-	)
-	signature := blsu.Sign(validatorKey.ValidatorSecretKey, signingRoot[:]).Serialize()
-	return &deneb.SignedBlockContents{
+func SignBlockContents(spec map[string]interface{}, blockContents *apiv1deneb.BlockContents, beaconBlockDomain phase0.Domain, validatorKey *keys.ValidatorKey) (*apiv1deneb.SignedBlockContents, error) {
+	blockRoot, err := blockContents.Block.HashTreeRoot()
+	if err != nil {
+		return nil, err
+	}
+	// Compute signing root
+	signingData := &phase0.SigningData{
+		ObjectRoot: blockRoot,
+		Domain:     beaconBlockDomain,
+	}
+	signingRoot, err := signingData.HashTreeRoot()
+	if err != nil {
+		return nil, err
+	}
+	signatureBytes := blsu.Sign(validatorKey.ValidatorSecretKey, signingRoot[:]).Serialize()
+	var signature phase0.BLSSignature
+	copy(signature[:], signatureBytes[:])
+	return &apiv1deneb.SignedBlockContents{
 		SignedBlock: &deneb.SignedBeaconBlock{
-			Message:   *blockContents.Block,
+			Message:   blockContents.Block,
 			Signature: signature,
 		},
 		KZGProofs: blockContents.KZGProofs,
@@ -42,16 +66,16 @@ func SignBlockContents(spec *common.Spec, blockContents *deneb.BlockContents, be
 }
 
 func CreatedSignedBlockSidecarsBundle(
-	spec *common.Spec,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain common.BLSDomain,
+	spec map[string]interface{},
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 ) (*SignedBlockSidecarsBundle, error) {
 	signedBlockContents, err := SignBlockContents(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to sign block")
 	}
-	blobSidecars, err := signedBlockContents.GenerateSidecars(spec, tree.GetHashFn())
+	blobSidecars, err := GenerateSidecars(spec, signedBlockContents)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate blob sidecars")
 	}
@@ -62,9 +86,9 @@ func CreatedSignedBlockSidecarsBundle(
 }
 
 func CreateSignEquivocatingBlock(
-	spec *common.Spec,
-	beaconBlockContents *deneb.BlockContents,
-	beaconBlockDomain common.BLSDomain,
+	spec map[string]interface{},
+	beaconBlockContents *apiv1deneb.BlockContents,
+	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
 ) ([]*SignedBlockSidecarsBundle, error) {
 	// Create an equivocating block by modifying the graffiti of the block
@@ -80,14 +104,16 @@ func CreateSignEquivocatingBlock(
 	if err := graffitiModifier.ModifyBlock(spec, equivocatingBlockContents.Block); err != nil {
 		return nil, errors.Wrap(err, "failed to modify block")
 	}
+	beaconRoot, _ := beaconBlockContents.Block.HashTreeRoot()
+	equivRoot, _ := equivocatingBlockContents.Block.HashTreeRoot()
 	logrus.WithFields(
 		logrus.Fields{
-			"beacon_block_root": beaconBlockContents.Block.HashTreeRoot(spec, tree.GetHashFn()).String(),
-			"equiv_block_root":  equivocatingBlockContents.Block.HashTreeRoot(spec, tree.GetHashFn()).String(),
+			"beacon_block_root": fmt.Sprintf("%x", beaconRoot),
+			"equiv_block_root":  fmt.Sprintf("%x", equivRoot),
 		},
 	).Debug("created equivocating block")
 
-	beaconBlocksContents := []*deneb.BlockContents{
+	beaconBlocksContents := []*apiv1deneb.BlockContents{
 		beaconBlockContents,
 		equivocatingBlockContents,
 	}
@@ -99,7 +125,7 @@ func CreateSignEquivocatingBlock(
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to sign block")
 		}
-		blobSidecars, err := signedBlockContents.GenerateSidecars(spec, tree.GetHashFn())
+		blobSidecars, err := GenerateSidecars(spec, signedBlockContents)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to generate blob sidecars")
 		}
@@ -112,8 +138,9 @@ func CreateSignEquivocatingBlock(
 }
 
 func CopyInclusionProofs(proof deneb.KZGCommitmentInclusionProof) deneb.KZGCommitmentInclusionProof {
-	copiedProof := make(deneb.KZGCommitmentInclusionProof, len(proof))
-	copy(copiedProof, proof)
+	// KZGCommitmentInclusionProof is a fixed-size array in go-eth2-client
+	var copiedProof deneb.KZGCommitmentInclusionProof
+	copy(copiedProof[:], proof[:])
 	return copiedProof
 }
 
@@ -127,7 +154,7 @@ func CopyBlobSidecars(blobs []*deneb.BlobSidecar) ([]*deneb.BlobSidecar, error) 
 			SignedBlockHeader:           blob.SignedBlockHeader,
 			KZGCommitmentInclusionProof: CopyInclusionProofs(blob.KZGCommitmentInclusionProof),
 		}
-		copiedBlob.Blob = make([]byte, len(blob.Blob))
+		// Blob is a fixed-size array in go-eth2-client
 		copy(copiedBlob.Blob[:], blob.Blob[:])
 		copiedBlobs[i] = copiedBlob
 	}
@@ -137,23 +164,58 @@ func CopyBlobSidecars(blobs []*deneb.BlobSidecar) ([]*deneb.BlobSidecar, error) 
 func CopyBlobs(blobs []deneb.Blob) ([]deneb.Blob, error) {
 	copiedBlobs := make([]deneb.Blob, len(blobs))
 	for i, blob := range blobs {
-		copiedBlob := make([]byte, len(blob))
+		// Blob is a fixed-size array, just copy it
+		var copiedBlob deneb.Blob
 		copy(copiedBlob[:], blob[:])
 		copiedBlobs[i] = copiedBlob
 	}
 	return copiedBlobs, nil
 }
 
-func CopyBlockContents(bc *deneb.BlockContents) (*deneb.BlockContents, error) {
+func CopyBlockContents(bc *apiv1deneb.BlockContents) (*apiv1deneb.BlockContents, error) {
 	if bc.Block == nil {
 		return nil, errors.New("block contents block is nil")
 	}
-	copiedBlock := *bc.Block
-	copiedBlockContents := &deneb.BlockContents{
-		Block:     &copiedBlock,
-		KZGProofs: bc.KZGProofs,
+
+	// Deep copy the block
+	copiedBlock := &deneb.BeaconBlock{
+		Slot:          bc.Block.Slot,
+		ProposerIndex: bc.Block.ProposerIndex,
+		ParentRoot:    bc.Block.ParentRoot,
+		StateRoot:     bc.Block.StateRoot,
+		Body:          nil, // Will be set below
+	}
+
+	// Deep copy the block body
+	if bc.Block.Body != nil {
+		body := bc.Block.Body
+		copiedBody := &deneb.BeaconBlockBody{
+			RANDAOReveal:          body.RANDAOReveal,
+			ETH1Data:              body.ETH1Data,
+			Graffiti:              body.Graffiti,
+			ProposerSlashings:     body.ProposerSlashings,
+			AttesterSlashings:     body.AttesterSlashings,
+			Attestations:          body.Attestations,
+			Deposits:              body.Deposits,
+			VoluntaryExits:        body.VoluntaryExits,
+			SyncAggregate:         body.SyncAggregate,
+			ExecutionPayload:      body.ExecutionPayload,
+			BLSToExecutionChanges: body.BLSToExecutionChanges,
+			BlobKZGCommitments:    body.BlobKZGCommitments,
+		}
+		copiedBlock.Body = copiedBody
+	}
+
+	// Copy KZG proofs
+	copiedKZGProofs := make([]deneb.KZGProof, len(bc.KZGProofs))
+	copy(copiedKZGProofs, bc.KZGProofs)
+
+	copiedBlockContents := &apiv1deneb.BlockContents{
+		Block:     copiedBlock,
+		KZGProofs: copiedKZGProofs,
 		Blobs:     nil,
 	}
+
 	copiedBlobs, err := CopyBlobs(bc.Blobs)
 	if err != nil {
 		return nil, err
@@ -162,7 +224,7 @@ func CopyBlockContents(bc *deneb.BlockContents) (*deneb.BlockContents, error) {
 	return copiedBlockContents, nil
 }
 
-func MultiPeerBlobBroadcast(spec *common.Spec, peers p2p.TestPeers, blobsLists ...[]*deneb.BlobSidecar) error {
+func MultiPeerBlobBroadcast(spec map[string]interface{}, peers p2p.TestPeers, blobsLists ...[]*deneb.BlobSidecar) error {
 	if len(peers) != len(blobsLists) {
 		return errors.New("peers and blobsLists must have the same length")
 	}
@@ -173,7 +235,7 @@ func MultiPeerBlobBroadcast(spec *common.Spec, peers p2p.TestPeers, blobsLists .
 	broadcastBlobs := func(testPeer *p2p.TestPeer, blobs []*deneb.BlobSidecar) {
 		defer wg.Done()
 		for i, blob := range blobs {
-			if err := testPeer.BroadcastBlobSidecar(spec, blob, nil); err != nil {
+			if err := testPeer.BroadcastBlobSidecar(context.Background(), spec, blob, nil); err != nil {
 				errs <- errors.Wrapf(err, "failed to broadcast signed blob %d", i)
 				return
 			}
@@ -201,7 +263,7 @@ type SignedBlockSidecarsBundle struct {
 }
 
 type BundleBroadcaster struct {
-	Spec  *common.Spec
+	Spec  map[string]interface{}
 	Peers p2p.TestPeers
 	// Delay in milliseconds between broadcast of blocks and blob sidecars
 	DelayMilliseconds int
@@ -216,9 +278,15 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 		return errors.New("peers and bundles must have the same length")
 	}
 
+	// If there's a delay configured, apply it BEFORE establishing any P2P connections
+	// This ensures we don't hold connections open during the delay period
+	if b.DelayMilliseconds > 0 {
+		time.Sleep(time.Duration(b.DelayMilliseconds) * time.Millisecond)
+	}
+
 	broadcastBlobs := func(testPeer *p2p.TestPeer, blobs []*deneb.BlobSidecar) error {
 		for i, blob := range blobs {
-			if err := testPeer.BroadcastBlobSidecar(b.Spec, blob, nil); err != nil {
+			if err := testPeer.BroadcastBlobSidecar(context.Background(), b.Spec, blob, nil); err != nil {
 				return errors.Wrapf(err, "failed to broadcast signed blob %d", i)
 			}
 		}
@@ -226,7 +294,7 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 	}
 
 	broadcastBlock := func(testPeer *p2p.TestPeer, signedBlock *deneb.SignedBeaconBlock) error {
-		if err := testPeer.BroadcastSignedBeaconBlock(b.Spec, signedBlock); err != nil {
+		if err := testPeer.BroadcastSignedBeaconBlock(context.Background(), b.Spec, signedBlock); err != nil {
 			return errors.Wrap(err, "failed to broadcast signed block")
 		}
 		return nil
@@ -242,9 +310,6 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 				errs <- err
 				return
 			}
-			if b.DelayMilliseconds > 0 {
-				time.Sleep(time.Duration(b.DelayMilliseconds) * time.Millisecond)
-			}
 			if err := broadcastBlock(testPeer, bundle.SignedBlock); err != nil {
 				errs <- err
 				return
@@ -253,9 +318,6 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 			if err := broadcastBlock(testPeer, bundle.SignedBlock); err != nil {
 				errs <- err
 				return
-			}
-			if b.DelayMilliseconds > 0 {
-				time.Sleep(time.Duration(b.DelayMilliseconds) * time.Millisecond)
 			}
 			if err := broadcastBlobs(testPeer, bundle.BlobSidecars); err != nil {
 				errs <- err
@@ -283,7 +345,7 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 }
 
 type BlockModifier interface {
-	ModifyBlock(spec *common.Spec, block interface{}) error
+	ModifyBlock(spec map[string]interface{}, block interface{}) error
 }
 
 type GraffitiModifier struct {
@@ -291,7 +353,7 @@ type GraffitiModifier struct {
 	Append      bool
 }
 
-func TextToRoot(s string) (root tree.Root, err error) {
+func TextToRoot(s string) (root phase0.Root, err error) {
 	if len([]byte(s)) > len(root) {
 		err = fmt.Errorf("text is too long to fit in a root: %s", s)
 		return
@@ -300,12 +362,12 @@ func TextToRoot(s string) (root tree.Root, err error) {
 	return
 }
 
-func RootToText(root tree.Root) (string, error) {
+func RootToText(root phase0.Root) (string, error) {
 	i := bytes.Index(root[:], []byte{0})
 	return string(root[:i]), nil
 }
 
-func (gm *GraffitiModifier) ModifyBlock(spec *common.Spec, block interface{}) error {
+func (gm *GraffitiModifier) ModifyBlock(spec map[string]interface{}, block interface{}) error {
 	var prefix string
 	if gm.Append {
 		var err error

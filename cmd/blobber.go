@@ -12,13 +12,40 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/marioevz/blobber"
-	"github.com/marioevz/blobber/config"
-	"github.com/marioevz/blobber/proposal_actions"
-	"github.com/marioevz/eth-clients/clients"
-	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
 	"github.com/sirupsen/logrus"
+
+	"github.com/marioevz/blobber"
+	"github.com/marioevz/blobber/beacon"
+	"github.com/marioevz/blobber/config"
+	"github.com/marioevz/blobber/logger"
+	"github.com/marioevz/blobber/proposal_actions"
 )
+
+// Build-time variables injected via ldflags
+var (
+	gitCommit = "unknown"
+	buildDate = "unknown"
+)
+
+func init() {
+	// Skip banner if help is requested
+	for _, arg := range os.Args[1:] {
+		if arg == "-h" || arg == "--help" || arg == "-help" || arg == "help" {
+			return
+		}
+	}
+
+	// Use stderr to ensure this is visible
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "########################################")
+	fmt.Fprintf(os.Stderr, "# BLOBBER INIT (%s) #\n", gitCommit)
+	fmt.Fprintln(os.Stderr, "########################################")
+	fmt.Fprintf(os.Stderr, "# Binary: %s\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "# Args: %v\n", os.Args[1:])
+	fmt.Fprintf(os.Stderr, "# Build Date: %s\n", buildDate)
+	fmt.Fprintln(os.Stderr, "########################################")
+	fmt.Fprintln(os.Stderr, "")
+}
 
 type Logger struct{}
 
@@ -37,6 +64,14 @@ func (i *arrayFlags) Set(value string) error {
 	return nil
 }
 
+func mustGetwd() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "unknown"
+	}
+	return wd
+}
+
 func fatalf(format string, args ...interface{}) {
 	fatal(fmt.Errorf(format, args...))
 }
@@ -47,7 +82,60 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
+func printUsage() {
+	fmt.Fprintf(os.Stderr, `Blobber - Beacon Chain DevP2P Blob Testing Proxy
+Version: %s (built: %s)
+
+WARNING: This tool can cause validator SLASHING. Never use on Mainnet!
+
+USAGE:
+  blobber [options]
+
+DESCRIPTION:
+  Blobber acts as a proxy between beacon and validator clients to intercept,
+  modify, delay, or corrupt blob sidecars for testing purposes.
+
+OPTIONS:
+`, gitCommit, buildDate)
+
+	flag.PrintDefaults()
+
+	fmt.Fprintf(os.Stderr, `
+EXAMPLES:
+  # Basic usage with one beacon client
+  blobber --cl http://beacon:4000 --validator-key-file keys.txt --enable-unsafe-mode
+
+  # Multiple beacon clients with blob gossip delay
+  blobber --cl http://beacon1:4000 --cl http://beacon2:4000 \
+    --validator-key-folder /path/to/keys \
+    --proposal-action '{"name": "blob_gossip_delay", "delay_milliseconds": 1000}' \
+    --enable-unsafe-mode
+
+  # With non-validating clients
+  blobber --cl http://validator-beacon:4000 \
+    --cl-non-validating http://observer-beacon:4000 \
+    --validator-key-file keys.txt \
+    --enable-unsafe-mode
+
+PROPOSAL ACTIONS:
+  Available actions (use with --proposal-action):
+  - default: Standard block and blob broadcasting
+  - blob_gossip_delay: Delay blob broadcasting by specified milliseconds
+  - equivocating_blob_sidecars: Create equivocating blob sidecars
+  - invalid_equivocating_block_and_blobs: Broadcast different blocks/blobs to different peers
+  - equivocating_block_header_in_blobs: Use equivocating block header in blob sidecars
+  - invalid_equivocating_block: Broadcast equivocating blocks
+
+  See proposal_actions/README.md for detailed documentation.
+
+SAFETY:
+  You MUST use --enable-unsafe-mode to run this tool. This is a safety measure
+  to prevent accidental usage on production networks.
+`)
+}
+
 func main() {
+	// Define all flags first
 	var (
 		clEndpoints                       arrayFlags
 		nonValidatingClEndpoints          arrayFlags
@@ -66,6 +154,9 @@ func main() {
 		blobberID                         uint64
 		unsafeMode                        bool
 	)
+
+	// Set custom usage function
+	flag.Usage = printUsage
 
 	flag.Var(
 		&clEndpoints,
@@ -162,10 +253,54 @@ func main() {
 		"Enable unsafe mode, only use this if you know what you're doing and never attempt to run this tool on mainnet.",
 	)
 
+	// Parse flags
 	err := flag.CommandLine.Parse(os.Args[1:])
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "ERROR: Failed to parse flags: %v\n", err)
+		os.Exit(1)
 	}
+
+	// Check for help flag after parsing (this catches -h and --help)
+	if flag.CommandLine.Parsed() && (flag.CommandLine.NArg() > 0 && flag.CommandLine.Arg(0) == "help") {
+		printUsage()
+		os.Exit(0)
+	}
+
+	// Log startup - this MUST appear if the new binary is being used
+	fmt.Fprintf(os.Stderr, "=== BLOBBER STARTING ===\n")
+	fmt.Fprintf(os.Stderr, "Git Commit: %s\n", gitCommit)
+	fmt.Fprintf(os.Stderr, "Build Date: %s\n", buildDate)
+	fmt.Fprintf(os.Stderr, "Args (%d): %v\n", len(os.Args), os.Args)
+	fmt.Fprintf(os.Stderr, "Working directory: %s\n", mustGetwd())
+
+	// Check if proposal action args are present
+	hasProposalAction := false
+	hasFrequency := false
+	for _, arg := range os.Args[1:] {
+		if strings.HasPrefix(arg, "--proposal-action=") || strings.HasPrefix(arg, "-proposal-action=") {
+			hasProposalAction = true
+			fmt.Fprintf(os.Stderr, "Found proposal-action arg: %s\n", arg)
+		}
+		if strings.HasPrefix(arg, "--proposal-action-frequency=") || strings.HasPrefix(arg, "-proposal-action-frequency=") {
+			hasFrequency = true
+			fmt.Fprintf(os.Stderr, "Found proposal-action-frequency arg: %s\n", arg)
+		}
+	}
+
+	if !hasProposalAction && !hasFrequency {
+		fmt.Fprintf(os.Stderr, "WARNING: No proposal action arguments found in command line!\n")
+		fmt.Fprintf(os.Stderr, "This suggests blobber_extra_params are not being passed from Kurtosis.\n")
+	}
+
+	fmt.Println("=== PARSING FLAGS ===")
+	fmt.Fprintf(os.Stderr, "=== PARSING FLAGS ===\n")
+
+	fmt.Fprintf(os.Stderr, "=== FLAGS PARSED SUCCESSFULLY ===\n")
+	fmt.Fprintf(os.Stderr, "proposalActionJson: '%s'\n", proposalActionJson)
+	fmt.Fprintf(os.Stderr, "proposalActionFrequency: %d\n", proposalActionFrequency)
+	fmt.Printf("clEndpoints: %v\n", clEndpoints)
+	fmt.Printf("externalIP: %s\n", externalIP)
+	fmt.Printf("unsafeMode: %v\n", unsafeMode)
 
 	if !unsafeMode {
 		fmt.Printf("WARNING: Some of the actions performed by this tool are unsafe and will get a validator SLASHED. Never run this tool on mainnet, and only run in test networks. If you know what you're doing, use the --enable-unsafe-mode flag to ignore this warning an proceed.\n\n")
@@ -173,11 +308,14 @@ func main() {
 	}
 
 	if len(clEndpoints) == 0 {
+		fmt.Println("ERROR: No consensus layer endpoints provided")
 		fatalf("at least one consensus layer client endpoint is required")
 	}
 
+	fmt.Printf("Found %d CL endpoints\n", len(clEndpoints))
+
 	type beaconEndpoint struct {
-		BeaconClient *beacon_client.BeaconClient
+		BeaconClient *beacon.BeaconClientAdapter
 		Validator    bool
 	}
 
@@ -187,8 +325,8 @@ func main() {
 
 	addBeaconClient := func(i int, clEndpoint string, validator bool) {
 		defer wg.Done()
-		// Configure an external CL
-		externalCl, err := clients.ExternalClientFromURL(clEndpoint, "cl")
+		// Parse the beacon client URL
+		beaconAPIURL, err := beacon.ParseBeaconURL(clEndpoint)
 		if err != nil {
 			fatalf(
 				"error parsing consensus client url (%s): %v\n",
@@ -197,35 +335,31 @@ func main() {
 			)
 		}
 
-		beaconCfg := beacon_client.BeaconClientConfig{}
-		if clPort := externalCl.GetPort(); clPort != nil {
-			beaconCfg.BeaconAPIPort = int(*clPort)
-		}
-		bn := &beacon_client.BeaconClient{
-			Client: externalCl,
-			Logger: &Logger{},
-			Config: beaconCfg,
-		}
-
 		initctx, cancel := context.WithTimeout(
 			context.Background(),
 			time.Second*time.Duration(clientInitTimeoutSeconds),
 		)
 		defer cancel()
-		if err := bn.Init(initctx); err != nil {
-			if initctx.Err() != nil {
-				fatalf(
-					"error initializing consensus client: %d second init timeout exceeded\n",
-					clientInitTimeoutSeconds,
-				)
-			}
-			fatalf(
-				"error initializing consensus client: %v\n",
-				err,
-			)
+
+		// Create our new beacon client adapter
+		adapter, err := beacon.NewBeaconClientAdapter(initctx, beaconAPIURL)
+		if err != nil {
+			fatalf("error creating beacon client adapter: %v\n", err)
 		}
+
+		// Set up logger on the adapter's embedded BeaconClient
+		if adapter.BeaconClient != nil {
+			adapter.Logger = &Logger{}
+
+			// Initialize the old client (this populates spec and other fields)
+			if err := adapter.Init(initctx); err != nil {
+				// Log warning but continue as we're using the new client
+				logrus.WithError(err).Warn("Failed to initialize old beacon client")
+			}
+		}
+
 		beaconClients[i] = beaconEndpoint{
-			BeaconClient: bn,
+			BeaconClient: adapter,
 			Validator:    validator,
 		}
 	}
@@ -240,55 +374,133 @@ func main() {
 	}
 	wg.Wait()
 
+	fmt.Println("=== BEACON CLIENTS INITIALIZED ===")
+	fmt.Printf("Number of beacon clients: %d\n", len(beaconClients))
+	for i, bc := range beaconClients {
+		fmt.Printf("Beacon client %d: validator=%v\n", i, bc.Validator)
+	}
+
+	fmt.Println("=== BUILDING CONFIGURATION OPTIONS ===")
+	fmt.Printf("hostIP: %s\n", hostIP)
+	fmt.Printf("externalIP: %s\n", externalIP)
+	fmt.Printf("blobberID: %d\n", blobberID)
+	fmt.Printf("beaconPortStart: %d\n", beaconPortStart)
+	fmt.Printf("validatorProxyPortStart: %d\n", validatorProxyPortStart)
+	fmt.Printf("logLevel: %s\n", logLevel)
+
+	// Build base options first
 	blobberOpts := []config.Option{
 		config.WithHost(hostIP),
 		config.WithExternalIP(net.ParseIP(externalIP)),
 		config.WithID(blobberID),
 		config.WithSpec(beaconClients[0].BeaconClient.Config.Spec),
-		config.WithBeaconGenesisTime(*beaconClients[0].BeaconClient.Config.GenesisTime),
+		config.WithBeaconGenesisTime(uint64(beaconClients[0].BeaconClient.Config.GenesisTime.Unix())),
 		config.WithGenesisValidatorsRoot(*beaconClients[0].BeaconClient.Config.GenesisValidatorsRoot),
 		config.WithBeaconPortStart(beaconPortStart),
 		config.WithProxiesPortStart(validatorProxyPortStart),
-		config.WithProposalActionFrequency(uint64(proposalActionFrequency)),
 		config.WithMaxDevP2PSessionReuses(maxDevP2PSessionReuses),
 		config.WithLogLevel(logLevel),
 	}
+	fmt.Printf("Created %d base options\n", len(blobberOpts))
 
 	if validatorKeyFilePath != "" && validatorKeyFolderPath != "" {
 		fatalf("cannot specify both validator-key-file and validator-key-folder")
 	}
 
+	fmt.Printf("validatorKeyFilePath: '%s'\n", validatorKeyFilePath)
+	fmt.Printf("validatorKeyFolderPath: '%s'\n", validatorKeyFolderPath)
+
 	if validatorKeyFilePath != "" {
-		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFile(validatorKeyFilePath))
+		fmt.Printf("Adding validator keys from file: %s\n", validatorKeyFilePath)
+		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFile(context.Background(), validatorKeyFilePath))
 	} else if validatorKeyFolderPath != "" {
-		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFolder(validatorKeyFolderPath))
+		fmt.Printf("Adding validator keys from folder: %s\n", validatorKeyFolderPath)
+		blobberOpts = append(blobberOpts, config.WithValidatorKeysListFromFolder(context.Background(), validatorKeyFolderPath))
 	}
 
-	if proposalActionJson != "" {
+	// Debug output - print all args
+	fmt.Println("=== CONFIGURING PROPOSAL ACTION ===")
+	fmt.Printf("Raw args again: %v\n", os.Args)
+	fmt.Printf("proposalActionJson value: '%s' (len=%d)\n", proposalActionJson, len(proposalActionJson))
+	fmt.Printf("proposalActionFrequency value: %d\n", proposalActionFrequency)
+
+	logrus.Infof("All args: %v", os.Args)
+	logrus.Infof("proposalActionJson: '%s' (len=%d)", proposalActionJson, len(proposalActionJson))
+	logrus.Infof("proposalActionFrequency: %d", proposalActionFrequency)
+
+	// Handle proposal action and frequency together
+	// Trim any whitespace that might have been introduced
+	proposalActionJson = strings.TrimSpace(proposalActionJson)
+	fmt.Printf("After trim, proposalActionJson: '%s' (len=%d)\n", proposalActionJson, len(proposalActionJson))
+
+	if proposalActionJson != "" && proposalActionJson != "{}" {
+		fmt.Println("=== PARSING PROPOSAL ACTION ===")
+		logrus.Infof("Parsing proposal action JSON...")
+		fmt.Printf("About to parse JSON: '%s'\n", proposalActionJson)
+
 		proposalAction, err := proposal_actions.UnmarshallProposalAction([]byte(proposalActionJson))
 		if err != nil {
-			fatalf("error parsing proposal action: %v\n", err)
+			fmt.Printf("ERROR parsing proposal action: %v\n", err)
+			logrus.Errorf("Failed to parse proposal action JSON: %v", err)
+			fatalf("error parsing proposal action JSON '%s': %v\n", proposalActionJson, err)
 		}
+
+		fmt.Printf("Successfully parsed proposal action: %+v\n", proposalAction)
+		logrus.Infof("Successfully parsed proposal action: %v", proposalAction)
+
+		// Set the frequency on the proposal action before adding it
+		if proposalActionFrequency > 0 {
+			fmt.Printf("Setting frequency %d on proposal action\n", proposalActionFrequency)
+			logrus.Infof("Setting frequency %d on proposal action before adding to options", proposalActionFrequency)
+			proposalAction.SetFrequency(uint64(proposalActionFrequency))
+		}
+
+		// Now add the proposal action with frequency already set
+		fmt.Println("Adding proposal action to options...")
 		blobberOpts = append(blobberOpts, config.WithProposalAction(proposalAction))
+		fmt.Printf("Total options after adding proposal action: %d\n", len(blobberOpts))
+	} else {
+		fmt.Printf("No proposal action to parse (json='%s', len=%d)\n", proposalActionJson, len(proposalActionJson))
+		if proposalActionFrequency != 1 {
+			// If no proposal action but frequency is set to non-default value, error out
+			fmt.Printf("ERROR: frequency=%d but no proposal action\n", proposalActionFrequency)
+			fatalf("proposal-action-frequency=%d specified but no proposal-action provided\n", proposalActionFrequency)
+		}
 	}
 
 	if stateValidatorFetchTimeoutSeconds > 0 {
 		blobberOpts = append(blobberOpts, config.WithValidatorLoadTimeoutSeconds(stateValidatorFetchTimeoutSeconds))
 	}
 
-	b, err := blobber.NewBlobber(context.Background(), blobberOpts...)
-	if err != nil {
-		fatalf("error creating blobber: %v\n", err)
+	fmt.Println("=== CREATING BLOBBER ===")
+	fmt.Printf("Number of options: %d\n", len(blobberOpts))
+	for i, opt := range blobberOpts {
+		fmt.Printf("Option %d: %s\n", i, opt.Description)
 	}
 
+	// Create logger instance
+	log := logger.NewWithLevel(logLevel)
+
+	b, err := blobber.NewBlobber(context.Background(), log, blobberOpts...)
+	if err != nil {
+		fmt.Printf("ERROR: Failed to create blobber\n")
+		fmt.Printf("Error details: %v\n", err)
+		fatalf("error creating blobber: %v\n", err)
+	}
+	fmt.Println("=== BLOBBER CREATED SUCCESSFULLY ===")
+	logrus.Info("Blobber instance created successfully")
+
 	for _, bn := range beaconClients {
+		// Pass the adapter itself
 		vp := b.AddBeaconClient(bn.BeaconClient, bn.Validator)
-		logrus.WithFields(
-			logrus.Fields{
-				"ip":   externalIP,
-				"port": vp.Port(),
-			},
-		).Info("Validator proxy started")
+		if vp != nil {
+			logrus.WithFields(
+				logrus.Fields{
+					"ip":   externalIP,
+					"port": vp.Port(),
+				},
+			).Info("Validator proxy started")
+		}
 	}
 
 	// Listen to SIGINT and SIGTERM signals
@@ -296,5 +508,5 @@ func main() {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	<-sigs
 
-	b.Close()
+	_ = b.Close(context.Background())
 }

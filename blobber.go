@@ -6,24 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/gorilla/mux"
+	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
+	apiv1electra "github.com/attestantio/go-eth2-client/api/v1/electra"
+	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/pkg/errors"
+
+	"github.com/marioevz/blobber/beacon"
 	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/config"
+	blobberrors "github.com/marioevz/blobber/errors"
 	"github.com/marioevz/blobber/keys"
+	"github.com/marioevz/blobber/logger"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/marioevz/blobber/validator_proxy"
-	beacon_client "github.com/marioevz/eth-clients/clients/beacon"
-	"github.com/pkg/errors"
-	"github.com/protolambda/eth2api"
-	"github.com/protolambda/eth2api/client/beaconapi"
-	"github.com/protolambda/zrnt/eth2/beacon"
-	beacon_common "github.com/protolambda/zrnt/eth2/beacon/common"
-	"github.com/protolambda/zrnt/eth2/beacon/deneb"
-	"github.com/protolambda/ztyp/tree"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -33,7 +34,7 @@ const (
 	PortBeaconGRPC   = 4001
 	PortMetrics      = 8080
 	PortValidatorAPI = 5000
-	FarFutureEpoch   = beacon_common.Epoch(0xffffffffffffffff)
+	FarFutureEpoch   = phase0.Epoch(0xffffffffffffffff)
 
 	DEFAULT_BLOBBER_HOST       = "0.0.0.0"
 	DEFAULT_BLOBBER_PORT       = 19999
@@ -43,7 +44,8 @@ const (
 )
 
 type Blobber struct {
-	ctx context.Context
+	ctx    context.Context
+	logger logger.Logger
 
 	proxies []*validator_proxy.ValidatorProxy
 	cls     []*p2p.BeaconClientPeer
@@ -52,26 +54,33 @@ type Blobber struct {
 	*config.Config
 
 	// Other
-	forkDecoder *beacon.ForkDecoder
+	// Note: ForkDecoder is not needed with go-eth2-client
 
 	// Records
 	builtBlocksMap    *BuiltBlocksMap
 	includeBlobRecord *common.BlobRecord
 	rejectBlobRecord  *common.BlobRecord
+
+	// Track slots we've already processed to avoid duplicate execution
+	processedSlots sync.Map
 }
 
 type BuiltBlocksMap struct {
-	BlockRoots map[beacon_common.Slot][32]byte
+	BlockRoots map[phase0.Slot][32]byte
 	sync.RWMutex
 }
 
-func init() {
-	logrus.SetLevel(logrus.InfoLevel)
-}
+func NewBlobber(ctx context.Context, log logger.Logger, opts ...config.Option) (*Blobber, error) {
+	if log == nil {
+		log = logger.New()
+	}
 
-func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
+	log.Info("Creating new Blobber instance")
+	log.Infof("Number of options to apply: %d", len(opts))
+
 	b := &Blobber{
-		ctx: ctx,
+		ctx:    ctx,
+		logger: log,
 
 		proxies: make([]*validator_proxy.ValidatorProxy, 0),
 		cls:     make([]*p2p.BeaconClientPeer, 0),
@@ -88,35 +97,55 @@ func NewBlobber(ctx context.Context, opts ...config.Option) (*Blobber, error) {
 		},
 
 		builtBlocksMap: &BuiltBlocksMap{
-			BlockRoots: make(map[beacon_common.Slot][32]byte),
+			BlockRoots: make(map[phase0.Slot][32]byte),
 		},
 		includeBlobRecord: common.NewBlobRecord(),
 		rejectBlobRecord:  common.NewBlobRecord(),
 	}
 
+	log.Info("Applying configuration options...")
+
 	// Apply the options
-	if err := b.Config.Apply(opts...); err != nil {
+	if err := b.Apply(opts...); err != nil {
+		log.Errorf("Failed to apply options: %v", err)
+
+		// Check if this is the specific error we're seeing
+		if strings.Contains(err.Error(), "cannot set ProposalActionFrequency without ProposalAction") {
+			fmt.Fprintf(os.Stderr, "\n!!! KNOWN ISSUE DETECTED !!!\n")
+			fmt.Fprintf(os.Stderr, "This error occurs when proposal action parameters are not passed correctly.\n")
+			fmt.Fprintf(os.Stderr, "Check that blobber_extra_params in your Kurtosis YAML includes:\n")
+			fmt.Fprintf(os.Stderr, "  - '--proposal-action={\"name\": \"blob_gossip_delay\", \"delay_milliseconds\": 1500}'\n")
+			fmt.Fprintf(os.Stderr, "  - '--proposal-action-frequency=1'\n")
+			fmt.Fprintf(os.Stderr, "\nCurrent command line args: %v\n", os.Args)
+		}
+
 		return nil, errors.Wrap(err, "failed to apply options")
 	}
+	log.Info("Successfully applied all configuration options")
 
 	if b.Spec == nil {
-		return nil, fmt.Errorf("no spec configured")
+		return nil, blobberrors.ErrNoSpecConfigured
 	}
 	if b.ProxiesPortStart == 0 {
-		return nil, fmt.Errorf("no proxies port start configured")
+		return nil, blobberrors.ErrNoProxiesPortConfigured
 	}
-	if b.GenesisValidatorsRoot == (tree.Root{}) {
-		return nil, fmt.Errorf("no genesis validators root configured")
+	if b.GenesisValidatorsRoot == (phase0.Root{}) {
+		return nil, blobberrors.ErrNoGenesisValidatorsRoot
 	}
 	if b.ExternalIP == nil {
-		return nil, fmt.Errorf("no external ip configured")
+		return nil, blobberrors.ErrNoExternalIPConfigured
 	}
 	if b.BeaconPortStart == 0 {
 		b.BeaconPortStart = PortBeaconTCP
 	}
 
-	// Create the fork decoder
-	b.forkDecoder = beacon.NewForkDecoder(b.Spec, b.GenesisValidatorsRoot)
+	// Note: ForkDecoder is not needed with go-eth2-client
+	// Fork digest calculation is handled differently
+
+	// Set logger for TestP2P
+	if b.TestP2P != nil {
+		b.SetLogger(log)
+	}
 
 	return b, nil
 }
@@ -139,19 +168,20 @@ func (b *Blobber) RejectBlobRecord() *common.BlobRecord {
 	return b.rejectBlobRecord
 }
 
-func (b *Blobber) Close() {
+func (b *Blobber) Close(ctx context.Context) error {
 	for _, proxy := range b.proxies {
 		proxy.Cancel()
 	}
+	return nil
 }
 
-func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient, validatorProxy bool) *validator_proxy.ValidatorProxy {
+func (b *Blobber) AddBeaconClient(cl *beacon.BeaconClientAdapter, validatorProxy bool) *validator_proxy.ValidatorProxy {
 	b.cls = append(b.cls, &p2p.BeaconClientPeer{BeaconClient: cl})
 	if !validatorProxy {
 		return nil
 	}
 	beaconAPIEndpoint := cl.GetAddress()
-	logrus.WithFields(logrus.Fields{
+	b.logger.WithFields(map[string]interface{}{
 		"beacon_endpoint": beaconAPIEndpoint,
 	}).Info("Adding proxy")
 	id := len(b.proxies)
@@ -162,6 +192,7 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient, validatorProxy
 			"/eth/v3/validator/blocks/{slot}": b.genValidatorBlockHandler(cl, id, 3),
 		},
 		b.AlwaysErrorValidatorResponse,
+		b.logger,
 	)
 	if err != nil {
 		panic(err)
@@ -170,60 +201,52 @@ func (b *Blobber) AddBeaconClient(cl *beacon_client.BeaconClient, validatorProxy
 
 	// Update the validators map
 	if b.ValidatorKeys == nil {
-		b.ValidatorKeys = make(map[beacon_common.ValidatorIndex]*keys.ValidatorKey)
+		b.ValidatorKeys = make(map[phase0.ValidatorIndex]*keys.ValidatorKey)
 	}
-	validatorResponses, err := b.loadStateValidators(b.ctx, cl, eth2api.StateHead, nil, nil)
+	validatorCount, err := b.loadStateValidators(b.ctx, cl, beacon.StateId("head"), nil, nil)
 	if err != nil {
+		b.logger.WithFields(map[string]interface{}{
+			"error": err,
+		}).Error("Failed to load validators from beacon node")
+		fmt.Fprintf(os.Stderr, "ERROR: Failed to load validators: %v\n", err)
 		panic(err)
 	}
-	logrus.WithFields(
-		logrus.Fields{
-			"state_validator_count": validatorResponses,
-			"keyed_validator_count": len(b.ValidatorKeys),
-		},
-	).Info("Loaded validators from beacon node")
+	b.logger.WithFields(map[string]interface{}{
+		"state_validator_count": validatorCount,
+		"keyed_validator_count": len(b.ValidatorKeys),
+	}).Info("Loaded validators from beacon node")
 
 	return proxy
 }
 
 func (b *Blobber) loadStateValidators(
 	parentCtx context.Context,
-	bn *beacon_client.BeaconClient,
-	stateId eth2api.StateId,
-	validatorIds []eth2api.ValidatorId,
-	statusFilter []eth2api.ValidatorStatus,
+	bn *beacon.BeaconClientAdapter,
+	stateId beacon.StateId,
+	validatorIds []beacon.ValidatorId,
+	statusFilter []beacon.ValidatorStatus,
 ) (int, error) {
-	var (
-		validatorResponses = make(
-			[]eth2api.ValidatorResponse,
-			0,
-		)
-		exists bool
-		err    error
-	)
 	ctx, cancel := context.WithTimeout(
 		parentCtx,
 		time.Second*time.Duration(b.ValidatorLoadTimeoutSeconds),
 	)
 	defer cancel()
-	exists, err = beaconapi.StateValidators(
+
+	// Use the beacon adapter's StateValidators method which already handles proper types
+	validatorResponses, err := bn.StateValidators(
 		ctx,
-		bn.API(),
 		stateId,
 		validatorIds,
 		statusFilter,
-		&validatorResponses,
 	)
-	if !exists {
-		return 0, fmt.Errorf("endpoint not found on beacon client")
-	}
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to get validators")
 	}
 
 	for _, validatorResponse := range validatorResponses {
+		// Index is already a phase0.ValidatorIndex
 		validatorIndex := validatorResponse.Index
-		validatorPubkey := validatorResponse.Validator.Pubkey
+		validatorPubkey := validatorResponse.Validator.PublicKey
 		for _, key := range b.ValidatorKeysList {
 			if bytes.Equal(key.PubKeyToBytes(), validatorPubkey[:]) {
 				b.ValidatorKeys[validatorIndex] = key
@@ -232,61 +255,85 @@ func (b *Blobber) loadStateValidators(
 		}
 	}
 
-	return len(validatorResponses), err
+	return len(validatorResponses), nil
 }
 
-func (b *Blobber) GetProducedBlockRoots() map[beacon_common.Slot][32]byte {
+func (b *Blobber) GetProducedBlockRoots() map[phase0.Slot][32]byte {
 	b.builtBlocksMap.RLock()
 	defer b.builtBlocksMap.RUnlock()
-	blockRoots := make(map[beacon_common.Slot][32]byte)
+	blockRoots := make(map[phase0.Slot][32]byte)
 	for slot, blockRoot := range b.builtBlocksMap.BlockRoots {
 		blockRoots[slot] = blockRoot
 	}
 	return blockRoots
 }
 
-func (b *Blobber) updateStatus(cl *beacon_client.BeaconClient) error {
+func (b *Blobber) updateStatus(cl *beacon.BeaconClientAdapter) error {
 	ctx, cancel := context.WithTimeout(b.ctx, time.Second*1)
 	defer cancel()
-	block, err := cl.BlockV2(ctx, eth2api.BlockHead)
+	// cl is already a *beacon.BeaconClient, not an interface
+
+	block, err := cl.BlockV2(ctx, beacon.BlockHead)
 	if err != nil {
-		logrus.WithError(err).Error("Failed to get block")
-		return errors.Wrap(err, "failed to get block")
+		b.logger.WithField("error", err).Error("Failed to get block")
+		return blobberrors.NewBeaconClientError("BlockV2", cl.GetAddress(), err)
 	}
 
 	// Update the chainstate
-	b.ChainStatus.SetHead(block.Root(), block.Slot())
+	blockRoot := block.Root()
+	b.ChainStatus.SetHead(blockRoot, block.Slot())
 
 	// Update the fork digest
-	b.ChainStatus.SetForkDigest(b.forkDecoder.ForkDigest(b.Spec.SlotToEpoch(block.Slot())))
+	forkVersion, err := common.GetForkVersion(b.Spec, block.Slot())
+	if err != nil {
+		b.logger.WithField("error", err).Warn("Failed to get fork version")
+	} else {
+		forkDigest, err := common.ComputeForkDigest(forkVersion, b.GenesisValidatorsRoot)
+		if err != nil {
+			b.logger.WithField("error", err).Warn("Failed to compute fork digest")
+		} else {
+			b.ChainStatus.SetForkDigest(forkDigest)
+		}
+	}
 
 	return nil
 }
 
-func (b *Blobber) calcBeaconBlockDomain(slot beacon_common.Slot) beacon_common.BLSDomain {
-	return beacon_common.ComputeDomain(
-		beacon_common.DOMAIN_BEACON_PROPOSER,
-		b.Spec.ForkVersion(slot),
-		b.GenesisValidatorsRoot,
-	)
+func (b *Blobber) calcBeaconBlockDomain(slot phase0.Slot) phase0.Domain {
+	// Get domain type for beacon proposer
+	domainType, err := common.GetDomainType(b.Spec, "DOMAIN_BEACON_PROPOSER")
+	if err != nil {
+		b.logger.WithField("error", err).Error("Failed to get domain type")
+		return phase0.Domain{}
+	}
+
+	// Get fork version for the slot
+	forkVersion, err := common.GetForkVersion(b.Spec, slot)
+	if err != nil {
+		b.logger.WithField("error", err).Error("Failed to get fork version")
+		return phase0.Domain{}
+	}
+
+	// Compute domain
+	return common.ComputeDomain(domainType, forkVersion, b.GenesisValidatorsRoot)
 }
 
-func (b *Blobber) executeProposalActions(trigger_cl *beacon_client.BeaconClient, blResponse *deneb.BlockContents, validatorKey *keys.ValidatorKey) (bool, error) {
+func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter, blResponse *common.VersionedBlockContents, validatorKey *keys.ValidatorKey) (bool, error) {
 	b.Lock()
 	proposalAction := b.ProposalAction
 	b.Unlock()
 
 	if proposalAction == nil {
-		logrus.WithFields(logrus.Fields{
-			"slot": uint64(blResponse.Block.Slot),
+		b.logger.WithFields(map[string]interface{}{
+			"slot": uint64(blResponse.GetSlot()),
 		}).Info("No proposal action configured")
 		return false, nil
 	}
 
 	// Check the frequency
-	if proposalAction.Frequency() > 1 && uint64(blResponse.Block.Slot)%proposalAction.Frequency() != 0 {
-		logrus.WithFields(logrus.Fields{
-			"slot":      uint64(blResponse.Block.Slot),
+	if proposalAction.Frequency() > 1 && uint64(blResponse.GetSlot())%proposalAction.Frequency() != 0 {
+		b.logger.WithFields(map[string]interface{}{
+			"slot":      uint64(blResponse.GetSlot()),
 			"frequency": proposalAction.Frequency(),
 		}).Info("Skipping proposal action due to configured frequency")
 		return false, nil
@@ -294,8 +341,8 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon_client.BeaconClient,
 
 	// Check the max execution times
 	if proposalAction.MaxExecutionTimes() > 0 && proposalAction.TimesExecuted() >= proposalAction.MaxExecutionTimes() {
-		logrus.WithFields(logrus.Fields{
-			"slot":             uint64(blResponse.Block.Slot),
+		b.logger.WithFields(map[string]interface{}{
+			"slot":             uint64(blResponse.GetSlot()),
 			"max_execution":    proposalAction.MaxExecutionTimes(),
 			"times_executed":   proposalAction.TimesExecuted(),
 			"action_frequency": proposalAction.Frequency(),
@@ -304,15 +351,22 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon_client.BeaconClient,
 	}
 
 	// Log the proposal action
-	proposalActionFields := logrus.Fields(proposalAction.Fields())
+	proposalActionFields := proposalAction.Fields()
 	if len(proposalActionFields) > 0 {
-		logrus.WithFields(proposalActionFields).Info("Action configuration")
+		b.logger.WithFields(proposalActionFields).Info("Action configuration")
+	}
+
+	// Convert versioned block to Deneb format for proposal actions
+	denebBlock := common.ConvertVersionedToDeneb(blResponse)
+	if denebBlock == nil {
+		b.logger.Error("Failed to convert block to Deneb format")
+		return false, blobberrors.ErrBlockConversionFailed
 	}
 
 	// Check whether the proposal action should be executed
-	if canExec, reason := proposalAction.CanExecute(b.Spec, blResponse); !canExec {
-		logrus.WithFields(logrus.Fields{
-			"slot":   uint64(blResponse.Block.Slot),
+	if canExec, reason := proposalAction.CanExecute(b.Spec, denebBlock); !canExec {
+		b.logger.WithFields(map[string]interface{}{
+			"slot":   uint64(blResponse.GetSlot()),
 			"reason": reason,
 		}).Info("Skipping proposal action")
 		return false, nil
@@ -320,43 +374,70 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon_client.BeaconClient,
 
 	testPeerCount := proposalAction.GetTestPeerCount()
 
-	// Peer with the beacon nodes and broadcast the block and blobs
-	testPeers, err := b.GetTestPeer(b.ctx, testPeerCount)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to create p2p")
-	} else if len(testPeers) != testPeerCount {
-		return false, fmt.Errorf("failed to create p2p, expected %d, got %d", testPeerCount, len(testPeers))
-	}
-	for i, testPeer := range testPeers {
-		logrus.WithFields(logrus.Fields{
-			"index":   i,
-			"peer_id": testPeer.Host.ID().String(),
-		}).Debug("Created test p2p")
-	}
+	// Try to create P2P peers if needed
+	var testPeers p2p.TestPeers
+	if testPeerCount > 0 {
+		// Peer with the beacon nodes and broadcast the block and blobs
+		var err error
+		testPeers, err = b.GetTestPeer(b.ctx, testPeerCount)
+		if err != nil {
+			b.logger.WithField("error", err).Warn("Failed to create P2P test peers, continuing without P2P support")
+			// Create empty test peers array to continue
+			testPeers = make(p2p.TestPeers, 0)
+		} else if len(testPeers) != testPeerCount {
+			b.logger.WithFields(map[string]interface{}{
+				"expected": testPeerCount,
+				"got":      len(testPeers),
+			}).Warn("Did not get expected number of test peers")
+		} else {
+			for i, testPeer := range testPeers {
+				b.logger.WithFields(map[string]interface{}{
+					"index":   i,
+					"peer_id": testPeer.Host.ID().String(),
+				}).Debug("Created test p2p")
+			}
 
-	// Connect to the beacon nodes
-	for i, cl := range b.cls {
-		testPeer := testPeers[i%len(testPeers)]
-		if err := testPeer.Connect(b.ctx, cl); err != nil {
-			return false, errors.Wrap(err, "failed to connect to beacon node")
+			// Connect to the beacon nodes
+			connectedCount := 0
+			for i, cl := range b.cls {
+				testPeer := testPeers[i%len(testPeers)]
+				// Always try to connect/reconnect to ensure fresh connection
+				if err := testPeer.Connect(b.ctx, cl); err != nil {
+					// Log the error but continue with other connections
+					b.logger.WithFields(map[string]interface{}{
+						"error":           err,
+						"beacon_index":    i,
+						"test_peer_index": i % len(testPeers),
+					}).Warn("Failed to connect to beacon node via P2P")
+				} else {
+					connectedCount++
+				}
+			}
+			b.logger.WithFields(map[string]interface{}{
+				"connected":     connectedCount,
+				"total_beacons": len(b.cls),
+			}).Info("P2P connection summary")
 		}
 	}
 
 	// Log current action info
-	blockRoot := blResponse.Block.HashTreeRoot(b.Spec, tree.GetHashFn())
-	logrus.WithFields(logrus.Fields{
-		"slot":              blResponse.Block.Slot,
-		"block_root":        blockRoot.String(),
-		"parent_block_root": blResponse.Block.ParentRoot.String(),
-		"blob_count":        len(blResponse.Blobs),
+	blockRoot, err := denebBlock.Block.HashTreeRoot()
+	if err != nil {
+		return false, errors.Wrap(blobberrors.ErrBlockRootCalculation, err.Error())
+	}
+	b.logger.WithFields(map[string]interface{}{
+		"slot":              blResponse.GetSlot(),
+		"block_root":        fmt.Sprintf("%#x", blockRoot),
+		"parent_block_root": fmt.Sprintf("%#x", denebBlock.Block.ParentRoot),
+		"blob_count":        blResponse.GetBlobsCount(),
 		"action_name":       proposalAction.Name(),
 	}).Info("Preparing action for block and blobs")
 
-	calcBeaconBlockDomain := b.calcBeaconBlockDomain(blResponse.Block.Slot)
+	calcBeaconBlockDomain := b.calcBeaconBlockDomain(blResponse.GetSlot())
 	executed, err := proposalAction.Execute(
 		b.Spec,
 		testPeers,
-		blResponse,
+		denebBlock,
 		calcBeaconBlockDomain,
 		validatorKey,
 		b.includeBlobRecord,
@@ -364,22 +445,31 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon_client.BeaconClient,
 	)
 	if executed && err == nil {
 		b.builtBlocksMap.Lock()
-		b.builtBlocksMap.BlockRoots[blResponse.Block.Slot] = blockRoot
+		b.builtBlocksMap.BlockRoots[blResponse.GetSlot()] = blockRoot
 		b.builtBlocksMap.Unlock()
 		b.ProposalAction.IncrementTimesExecuted()
 	}
 	return executed, errors.Wrap(err, "failed to execute proposal action")
 }
 
-func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id int, version int) validator_proxy.ResponseCallback {
+func (b *Blobber) genValidatorBlockHandler(cl *beacon.BeaconClientAdapter, id int, version int) validator_proxy.ResponseCallback {
 	return func(request *http.Request, response []byte) (bool, error) {
-		var slot beacon_common.Slot
-		if err := slot.UnmarshalJSON([]byte(mux.Vars(request)["slot"])); err != nil {
-			return false, errors.Wrap(err, "failed to unmarshal slot")
+		// Extract slot from URL path
+		// URL format: /eth/v2/validator/blocks/{slot} or /eth/v3/validator/blocks/{slot}
+		pathParts := strings.Split(request.URL.Path, "/")
+		if len(pathParts) < 6 {
+			return false, fmt.Errorf("invalid URL path: %s", request.URL.Path)
 		}
-		blockVersion, blockBlobResponse, err := ParseResponse(response)
+		slotStr := pathParts[len(pathParts)-1] // Last part should be the slot
+
+		slotUint, err := strconv.ParseUint(slotStr, 10, 64)
+		if err != nil {
+			return false, errors.Wrap(err, "failed to parse slot from URL")
+		}
+		slot := phase0.Slot(slotUint)
+		blockBlobResponse, err := ParseResponse(response)
 		if err != nil || blockBlobResponse == nil {
-			logrus.WithFields(logrus.Fields{
+			b.logger.WithFields(map[string]interface{}{
 				"proxy_id":   id,
 				"version":    version,
 				"slot":       slot,
@@ -391,38 +481,77 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon_client.BeaconClient, id in
 			}
 			return false, errors.New("failed to parse response")
 		}
+
+		// Skip if not Deneb or Electra
+		if blockBlobResponse.Version != common.VersionDeneb && blockBlobResponse.Version != common.VersionElectra {
+			b.logger.WithField("version", blockBlobResponse.Version).Info("Skipping non-blob version")
+			return false, nil
+		}
+
 		var validatorKey *keys.ValidatorKey
 		if b.ValidatorKeys != nil {
-			validatorKey = b.ValidatorKeys[blockBlobResponse.Block.ProposerIndex]
+			validatorKey = b.ValidatorKeys[blockBlobResponse.GetProposerIndex()]
 		}
-		logrus.WithFields(logrus.Fields{
+		b.logger.WithFields(map[string]interface{}{
 			"proxy_id":               id,
 			"endpoint":               request.URL.Path,
 			"endpoint_method":        request.Method,
 			"version":                version,
 			"slot":                   slot,
-			"block_version":          blockVersion,
-			"blob_count":             len(blockBlobResponse.Blobs),
-			"proposer_index":         blockBlobResponse.Block.ProposerIndex,
+			"block_version":          blockBlobResponse.Version,
+			"blob_count":             blockBlobResponse.GetBlobsCount(),
+			"proposer_index":         blockBlobResponse.GetProposerIndex(),
 			"proposer_key_available": validatorKey != nil,
-		}).Debug("Received response")
+			"request_id":             request.Header.Get("X-Request-ID"),
+		}).Info("Processing validator block request")
 
 		// Update the chainstate
 		if err := b.updateStatus(cl); err != nil {
-			logrus.WithError(err).Error("Failed to update chain status")
-			return false, errors.Wrap(err, "failed to update chain status")
+			b.logger.WithField("error", err).Error("Failed to update chain status")
+			return false, blobberrors.NewBeaconClientError("updateStatus", cl.GetAddress(), err)
+		}
+
+		// Check if we've already processed this slot to avoid duplicate execution
+		// This can happen when validators are configured with multiple beacon endpoints
+		slotKey := fmt.Sprintf("%d", slot)
+		if _, exists := b.processedSlots.LoadOrStore(slotKey, true); exists {
+			b.logger.WithFields(map[string]interface{}{
+				"slot":     slot,
+				"proxy_id": id,
+			}).Info("Slot already processed by another proxy, skipping proposal actions")
+			return false, nil
+		}
+
+		// Clean up old slots (keep only last 32 slots)
+		if slotUint > 32 {
+			oldSlotKey := fmt.Sprintf("%d", slotUint-32)
+			b.processedSlots.Delete(oldSlotKey)
 		}
 
 		// Execute the proposal actions
 		if validatorKey == nil {
-			logrus.Warn("No validator key found, skipping proposal actions")
-			return false, errors.Wrap(err, "no validator key found, skipping proposal actions")
+			b.logger.Warn("No validator key found, skipping proposal actions")
+			// Let the block proceed without modification
+			return false, nil
 		}
 		override, err := b.executeProposalActions(cl, blockBlobResponse, validatorKey)
 		if err != nil {
-			logrus.WithError(err).Error("Failed to execute proposal actions")
+			b.logger.WithFields(map[string]interface{}{
+				"error":        err,
+				"slot":         blockBlobResponse.GetSlot(),
+				"always_error": b.AlwaysErrorValidatorResponse,
+			}).Error("Failed to execute proposal actions")
+
+			// Check if we should fail block production on errors
+			if b.AlwaysErrorValidatorResponse {
+				// Fail block production - validator will receive HTTP 500
+				return false, err
+			}
+			// Otherwise, let the block proceed despite the error
+			// This allows testing proposal actions even when broadcasting fails
+			return false, nil
 		}
-		return override, errors.Wrap(err, "failed to execute proposal actions")
+		return override, nil
 	}
 }
 
@@ -431,25 +560,38 @@ type BlockDataStruct struct {
 	Data    *json.RawMessage `json:"data"`
 }
 
-func ParseResponse(response []byte) (string, *deneb.BlockContents, error) {
-	var (
-		blockDataStruct BlockDataStruct
-	)
+func ParseResponse(response []byte) (*common.VersionedBlockContents, error) {
+	var blockDataStruct BlockDataStruct
 	if err := json.Unmarshal(response, &blockDataStruct); err != nil || blockDataStruct.Version == nil || blockDataStruct.Data == nil {
-		return "", nil, errors.Wrap(err, "failed to unmarshal response into BlockDataStruct")
+		return nil, errors.Wrap(err, "failed to unmarshal response into BlockDataStruct")
 	}
 
-	if *blockDataStruct.Version != "deneb" {
-		logrus.WithField("version", blockDataStruct.Version).Warn("Unsupported version, skipping actions")
-		logrus.WithField("response", string(response)).Debug("Unsupported version, skipping actions")
-		return *blockDataStruct.Version, nil, nil
-	}
-
+	version := *blockDataStruct.Version
 	decoder := json.NewDecoder(bytes.NewReader(*blockDataStruct.Data))
-	data := new(deneb.BlockContents)
-	if err := decoder.Decode(&data); err != nil {
-		return *blockDataStruct.Version, nil, errors.Wrap(err, "failed to decode block contents")
-	}
 
-	return *blockDataStruct.Version, data, nil
+	switch version {
+	case common.VersionDeneb:
+		data := new(apiv1deneb.BlockContents)
+		if err := decoder.Decode(&data); err != nil {
+			return nil, errors.Wrap(err, "failed to decode deneb block contents")
+		}
+		return &common.VersionedBlockContents{
+			Version: version,
+			Deneb:   data,
+		}, nil
+
+	case common.VersionElectra:
+		data := new(apiv1electra.BlockContents)
+		if err := decoder.Decode(&data); err != nil {
+			return nil, errors.Wrap(err, "failed to decode electra block contents")
+		}
+		return &common.VersionedBlockContents{
+			Version: version,
+			Electra: data,
+		}, nil
+
+	default:
+		// Log unsupported version if needed (caller can log this)
+		return &common.VersionedBlockContents{Version: version}, nil
+	}
 }
