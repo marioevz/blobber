@@ -6,7 +6,7 @@ participants:
     blobber_image: parithoshj/blobber:refactor-v4
     blobber_extra_params:
       # Option 1: Use single quotes in YAML to avoid escaping
-      - '--proposal-action={"name": "blob_gossip_delay", "delay_milliseconds": 1500}'
+      - '--proposal-action={"name": "blob_gossip_delay", "delay_milliseconds": 30000}'
       - --proposal-action-frequency=1
     count: 1
   - el_type: geth

@@ -41,12 +41,12 @@ func TestNewBlobber(t *testing.T) {
 		t.Fatal("blobber config is nil")
 	}
 
-	if b.Config.Host != "localhost" {
-		t.Errorf("expected host localhost, got %s", b.Config.Host)
+	if b.Host != "localhost" {
+		t.Errorf("expected host localhost, got %s", b.Host)
 	}
 
-	if b.Config.ID != 1 {
-		t.Errorf("expected ID 1, got %d", b.Config.ID)
+	if b.ID != 1 {
+		t.Errorf("expected ID 1, got %d", b.ID)
 	}
 }
 
@@ -75,8 +75,8 @@ func TestBlobberWithValidatorKeys(t *testing.T) {
 	defer func() { _ = b.Close(ctx) }()
 
 	// Verify validator keys were set
-	if len(b.Config.ValidatorKeys) != 2 {
-		t.Errorf("expected 2 validator keys, got %d", len(b.Config.ValidatorKeys))
+	if len(b.ValidatorKeys) != 2 {
+		t.Errorf("expected 2 validator keys, got %d", len(b.ValidatorKeys))
 	}
 }
 

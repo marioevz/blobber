@@ -63,7 +63,9 @@ func GetStateValidators(
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to execute request")
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {

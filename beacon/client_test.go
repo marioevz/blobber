@@ -24,6 +24,7 @@ func TestNewClient(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 
 	// Test that required interfaces are checked

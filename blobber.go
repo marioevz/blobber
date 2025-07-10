@@ -144,7 +144,7 @@ func NewBlobber(ctx context.Context, log logger.Logger, opts ...config.Option) (
 
 	// Set logger for TestP2P
 	if b.TestP2P != nil {
-		b.TestP2P.SetLogger(log)
+		b.SetLogger(log)
 	}
 
 	return b, nil
@@ -379,7 +379,7 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 	if testPeerCount > 0 {
 		// Peer with the beacon nodes and broadcast the block and blobs
 		var err error
-		testPeers, err = b.TestP2P.GetTestPeer(b.ctx, testPeerCount)
+		testPeers, err = b.GetTestPeer(b.ctx, testPeerCount)
 		if err != nil {
 			b.logger.WithField("error", err).Warn("Failed to create P2P test peers, continuing without P2P support")
 			// Create empty test peers array to continue

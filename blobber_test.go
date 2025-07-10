@@ -31,6 +31,7 @@ func TestResponseParse(t *testing.T) {
 	denebBlock := blockBlobResponse.Deneb
 	if denebBlock == nil {
 		t.Fatal("deneb block is nil")
+		return
 	}
 
 	blockRoot, err := denebBlock.Block.HashTreeRoot()

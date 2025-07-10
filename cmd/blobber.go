@@ -34,7 +34,7 @@ func init() {
 			return
 		}
 	}
-	
+
 	// Use stderr to ensure this is visible
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "########################################")
@@ -97,9 +97,9 @@ DESCRIPTION:
 
 OPTIONS:
 `, gitCommit, buildDate)
-	
+
 	flag.PrintDefaults()
-	
+
 	fmt.Fprintf(os.Stderr, `
 EXAMPLES:
   # Basic usage with one beacon client
@@ -349,10 +349,10 @@ func main() {
 
 		// Set up logger on the adapter's embedded BeaconClient
 		if adapter.BeaconClient != nil {
-			adapter.BeaconClient.Logger = &Logger{}
+			adapter.Logger = &Logger{}
 
 			// Initialize the old client (this populates spec and other fields)
-			if err := adapter.BeaconClient.Init(initctx); err != nil {
+			if err := adapter.Init(initctx); err != nil {
 				// Log warning but continue as we're using the new client
 				logrus.WithError(err).Warn("Failed to initialize old beacon client")
 			}
@@ -508,5 +508,5 @@ func main() {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	<-sigs
 
-	b.Close(context.Background())
+	_ = b.Close(context.Background())
 }

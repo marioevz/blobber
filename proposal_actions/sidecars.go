@@ -96,42 +96,6 @@ func generateKZGCommitmentInclusionProof(body *deneb.BeaconBlockBody, blobIndex 
 	return proof, nil
 }
 
-// Helper function to create a signed block header from a signed block
-func createSignedBlockHeader(signedBlock *deneb.SignedBeaconBlock) (*phase0.SignedBeaconBlockHeader, error) {
-	bodyRoot, err := signedBlock.Message.Body.HashTreeRoot()
-	if err != nil {
-		return nil, fmt.Errorf("failed to compute body root: %w", err)
-	}
-
-	header := &phase0.BeaconBlockHeader{
-		Slot:          signedBlock.Message.Slot,
-		ProposerIndex: signedBlock.Message.ProposerIndex,
-		ParentRoot:    signedBlock.Message.ParentRoot,
-		StateRoot:     signedBlock.Message.StateRoot,
-		BodyRoot:      bodyRoot,
-	}
-
-	return &phase0.SignedBeaconBlockHeader{
-		Message:   header,
-		Signature: signedBlock.Signature,
-	}, nil
-}
-
-// computeKZGCommitmentsRoot computes the root of the KZG commitments list
-func computeKZGCommitmentsRoot(commitments []deneb.KZGCommitment) (phase0.Root, error) {
-	// Create a list of roots from the commitments
-	committeeRoots := make([][]byte, len(commitments))
-	for i, commitment := range commitments {
-		// Each commitment is already a 48-byte value that can be treated as a leaf
-		committeeRoots[i] = commitment[:]
-	}
-
-	// Use SSZ to compute the root of the list
-	// This would typically use a Merkle tree computation
-	// For now, returning a placeholder
-	return phase0.Root{}, nil
-}
-
 // VerifyBlobSidecar verifies that a blob sidecar is valid
 func VerifyBlobSidecar(sidecar *deneb.BlobSidecar) error {
 	if sidecar == nil {

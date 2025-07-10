@@ -17,7 +17,7 @@ func TestNewProxy(t *testing.T) {
 	// Create a test backend server
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("backend response"))
+		_, _ = w.Write([]byte("backend response"))
 	}))
 	defer backend.Close()
 
@@ -38,7 +38,7 @@ func TestNewProxy(t *testing.T) {
 	}
 
 	// Clean up
-	proxy.Cancel()
+	_ = proxy.Cancel()
 
 	// Verify proxy properties
 	// Note: ID is not directly exposed in the proxy struct
@@ -78,7 +78,7 @@ func TestProxyWithCallbacks(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(testResponse)
+		_, _ = w.Write(testResponse)
 	}))
 	defer backend.Close()
 
@@ -97,7 +97,9 @@ func TestProxyWithCallbacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating proxy: %v", err)
 	}
-	defer proxy.Cancel()
+	defer func() {
+		_ = proxy.Cancel()
+	}()
 
 	// Wait for proxy to start
 	time.Sleep(100 * time.Millisecond)
@@ -107,7 +109,9 @@ func TestProxyWithCallbacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error making request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)
@@ -132,7 +136,7 @@ func TestProxyErrorResponse(t *testing.T) {
 	// Create a test backend server
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("should not see this"))
+		_, _ = w.Write([]byte("should not see this"))
 	}))
 	defer backend.Close()
 
@@ -155,7 +159,9 @@ func TestProxyErrorResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating proxy: %v", err)
 	}
-	defer proxy.Cancel()
+	defer func() {
+		_ = proxy.Cancel()
+	}()
 
 	// Wait for proxy to start
 	time.Sleep(100 * time.Millisecond)
@@ -165,7 +171,9 @@ func TestProxyErrorResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error making request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Should get error response when alwaysError is true and callback returns error
 	if resp.StatusCode != http.StatusInternalServerError {
@@ -190,7 +198,7 @@ func TestProxyMethods(t *testing.T) {
 	// Create a test backend server that echoes the method
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(r.Method))
+		_, _ = w.Write([]byte(r.Method))
 	}))
 	defer backend.Close()
 
@@ -209,7 +217,9 @@ func TestProxyMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating proxy: %v", err)
 	}
-	defer proxy.Cancel()
+	defer func() {
+		_ = proxy.Cancel()
+	}()
 
 	// Wait for proxy to start
 	time.Sleep(100 * time.Millisecond)
@@ -229,7 +239,7 @@ func TestProxyMethods(t *testing.T) {
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			t.Fatalf("unexpected error reading response: %v", err)
 		}

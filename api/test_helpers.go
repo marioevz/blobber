@@ -20,21 +20,21 @@ func CreateMockBeaconServer(t *testing.T, validatorsHandler func(w http.Response
 			})
 		case "/eth/v1/node/syncing":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"data": map[string]interface{}{
 					"is_syncing": false,
 				},
 			})
 		case "/eth/v1/config/spec":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"data": map[string]interface{}{
 					"SECONDS_PER_SLOT": "12",
 				},
 			})
 		case "/eth/v1/beacon/genesis":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"data": map[string]interface{}{
 					"genesis_time": "1606824023",
 				},

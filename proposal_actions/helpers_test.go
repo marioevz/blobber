@@ -36,6 +36,7 @@ func TestBlockSigning(t *testing.T) {
 	blockContents := versionedBlockContents.Deneb
 	if blockContents == nil {
 		t.Fatal("deneb block is nil")
+		return
 	}
 
 	// expectedBlockContentsRoot := geth_common.HexToHash("0x63ab3be9cfed1fe67d61fc030edd985c838f865d524bdeb2faf340e03d861dd9")
@@ -132,6 +133,7 @@ func TestBlockCopying(t *testing.T) {
 	blockContents := versionedBlockContents.Deneb
 	if blockContents == nil {
 		t.Fatal("deneb block is nil")
+		return
 	}
 
 	// expectedBlockContentsRoot := geth_common.HexToHash("0x63ab3be9cfed1fe67d61fc030edd985c838f865d524bdeb2faf340e03d861dd9")
