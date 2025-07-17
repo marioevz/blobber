@@ -5,7 +5,7 @@ go 1.21.0
 toolchain go1.24.4
 
 require (
-	github.com/attestantio/go-eth2-client v0.26.0
+	github.com/attestantio/go-eth2-client v0.25.1-0.20250714093340-b821a9c55ae7
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/ethereum/go-ethereum v1.13.14
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb

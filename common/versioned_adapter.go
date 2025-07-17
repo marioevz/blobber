@@ -9,7 +9,7 @@ import (
 )
 
 // ConvertVersionedToDeneb converts a VersionedBlockContents to Deneb BlockContents for proposal actions
-// This allows existing proposal actions to work with both Deneb and Electra blocks
+// This allows existing proposal actions to work with Deneb, Electra, and Fulu blocks
 func ConvertVersionedToDeneb(versioned *VersionedBlockContents) *apiv1deneb.BlockContents {
 	if versioned == nil {
 		return nil
@@ -28,6 +28,17 @@ func ConvertVersionedToDeneb(versioned *VersionedBlockContents) *apiv1deneb.Bloc
 				Block:     convertElectraToDenebBlock(versioned.Electra.Block),
 				KZGProofs: versioned.Electra.KZGProofs,
 				Blobs:     versioned.Electra.Blobs,
+			}
+		}
+	case VersionFulu:
+		// For Fulu, we create a Deneb BlockContents with the compatible fields
+		if versioned.Fulu != nil {
+			// Convert Fulu to Deneb format
+			// Note: Fulu uses the same structure as Electra
+			return &apiv1deneb.BlockContents{
+				Block:     convertElectraToDenebBlock(versioned.Fulu.Block),
+				KZGProofs: versioned.Fulu.KZGProofs,
+				Blobs:     versioned.Fulu.Blobs,
 			}
 		}
 	}

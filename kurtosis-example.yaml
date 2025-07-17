@@ -15,6 +15,7 @@ participants:
     count: 1
 network_params:
   electra_fork_epoch: 100
+  fulu_fork_epoch: 200
 additional_services:
   - dora
   - spamoor
