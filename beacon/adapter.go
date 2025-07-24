@@ -199,6 +199,11 @@ func (a *BeaconClientAdapter) BlockV2(ctx context.Context, blockId BlockId) (*Ve
 			result.Version = BlockVersionElectra
 			result.Electra = response.Data.Electra
 		}
+	case spec.DataVersionFulu:
+		if response.Data.Fulu != nil {
+			result.Version = BlockVersionFulu
+			result.Fulu = response.Data.Fulu
+		}
 	default:
 		return nil, fmt.Errorf("unknown block version: %v", response.Data.Version)
 	}

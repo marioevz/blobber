@@ -11,13 +11,15 @@ import (
 const (
 	VersionDeneb   = "deneb"
 	VersionElectra = "electra"
+	VersionFulu    = "fulu"
 )
 
-// VersionedBlockContents represents block contents that can be either Deneb or Electra
+// VersionedBlockContents represents block contents that can be Deneb, Electra, or Fulu
 type VersionedBlockContents struct {
 	Version string
 	Deneb   *apiv1deneb.BlockContents
 	Electra *apiv1electra.BlockContents
+	Fulu    *apiv1electra.BlockContents // Fulu uses the same structure as Electra
 }
 
 // GetSlot returns the slot of the block
@@ -30,6 +32,10 @@ func (v *VersionedBlockContents) GetSlot() phase0.Slot {
 	case VersionElectra:
 		if v.Electra != nil && v.Electra.Block != nil {
 			return v.Electra.Block.Slot
+		}
+	case VersionFulu:
+		if v.Fulu != nil && v.Fulu.Block != nil {
+			return v.Fulu.Block.Slot
 		}
 	}
 	return phase0.Slot(0)
@@ -46,6 +52,10 @@ func (v *VersionedBlockContents) GetProposerIndex() phase0.ValidatorIndex {
 		if v.Electra != nil && v.Electra.Block != nil {
 			return v.Electra.Block.ProposerIndex
 		}
+	case VersionFulu:
+		if v.Fulu != nil && v.Fulu.Block != nil {
+			return v.Fulu.Block.ProposerIndex
+		}
 	}
 	return phase0.ValidatorIndex(0)
 }
@@ -60,6 +70,10 @@ func (v *VersionedBlockContents) GetBlobsCount() int {
 	case VersionElectra:
 		if v.Electra != nil {
 			return len(v.Electra.Blobs)
+		}
+	case VersionFulu:
+		if v.Fulu != nil {
+			return len(v.Fulu.Blobs)
 		}
 	}
 	return 0
@@ -77,6 +91,11 @@ func (v *VersionedBlockContents) GetBlobs() []deneb.Blob {
 			// Electra uses the same blob type as Deneb
 			return v.Electra.Blobs
 		}
+	case VersionFulu:
+		if v.Fulu != nil {
+			// Fulu uses the same blob type as Deneb
+			return v.Fulu.Blobs
+		}
 	}
 	return nil
 }
@@ -91,6 +110,10 @@ func (v *VersionedBlockContents) GetKZGProofs() []deneb.KZGProof {
 	case VersionElectra:
 		if v.Electra != nil {
 			return v.Electra.KZGProofs
+		}
+	case VersionFulu:
+		if v.Fulu != nil {
+			return v.Fulu.KZGProofs
 		}
 	}
 	return nil
@@ -112,6 +135,14 @@ func (v *VersionedBlockContents) GetElectraBlock() *electra.BeaconBlock {
 	return nil
 }
 
+// GetFuluBlock returns the Fulu block if this is a Fulu block
+func (v *VersionedBlockContents) GetFuluBlock() *electra.BeaconBlock {
+	if v.Version == VersionFulu && v.Fulu != nil {
+		return v.Fulu.Block
+	}
+	return nil
+}
+
 // GetGraffiti returns the graffiti field
 func (v *VersionedBlockContents) GetGraffiti() [32]byte {
 	switch v.Version {
@@ -122,6 +153,10 @@ func (v *VersionedBlockContents) GetGraffiti() [32]byte {
 	case VersionElectra:
 		if v.Electra != nil && v.Electra.Block != nil && v.Electra.Block.Body != nil {
 			return v.Electra.Block.Body.Graffiti
+		}
+	case VersionFulu:
+		if v.Fulu != nil && v.Fulu.Block != nil && v.Fulu.Block.Body != nil {
+			return v.Fulu.Block.Body.Graffiti
 		}
 	}
 	return [32]byte{}
@@ -138,6 +173,10 @@ func (v *VersionedBlockContents) SetGraffiti(graffiti [32]byte) {
 		if v.Electra != nil && v.Electra.Block != nil && v.Electra.Block.Body != nil {
 			v.Electra.Block.Body.Graffiti = graffiti
 		}
+	case VersionFulu:
+		if v.Fulu != nil && v.Fulu.Block != nil && v.Fulu.Block.Body != nil {
+			v.Fulu.Block.Body.Graffiti = graffiti
+		}
 	}
 }
 
@@ -151,6 +190,10 @@ func (v *VersionedBlockContents) GetBlobKZGCommitments() []deneb.KZGCommitment {
 	case VersionElectra:
 		if v.Electra != nil && v.Electra.Block != nil && v.Electra.Block.Body != nil {
 			return v.Electra.Block.Body.BlobKZGCommitments
+		}
+	case VersionFulu:
+		if v.Fulu != nil && v.Fulu.Block != nil && v.Fulu.Block.Body != nil {
+			return v.Fulu.Block.Body.BlobKZGCommitments
 		}
 	}
 	return nil
