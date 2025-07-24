@@ -132,6 +132,7 @@ const (
 	BlockVersionCapella   BlockVersion = "capella"
 	BlockVersionDeneb     BlockVersion = "deneb"
 	BlockVersionElectra   BlockVersion = "electra"
+	BlockVersionFulu      BlockVersion = "fulu"
 )
 
 // VersionedSignedBeaconBlock represents a versioned signed beacon block
@@ -143,6 +144,7 @@ type VersionedSignedBeaconBlock struct {
 	Capella   interface{}                `json:"-"`
 	Deneb     *deneb.SignedBeaconBlock   `json:"-"`
 	Electra   *electra.SignedBeaconBlock `json:"-"`
+	Fulu      *electra.SignedBeaconBlock `json:"-"` // Fulu uses the same structure as Electra
 }
 
 // Root returns the block root (state root)
@@ -159,6 +161,10 @@ func (v *VersionedSignedBeaconBlock) Root() phase0.Root {
 	case BlockVersionElectra:
 		if v.Electra != nil && v.Electra.Message != nil {
 			return v.Electra.Message.StateRoot
+		}
+	case BlockVersionFulu:
+		if v.Fulu != nil && v.Fulu.Message != nil {
+			return v.Fulu.Message.StateRoot
 		}
 	}
 	return phase0.Root{}
@@ -178,6 +184,10 @@ func (v *VersionedSignedBeaconBlock) Slot() phase0.Slot {
 	case BlockVersionElectra:
 		if v.Electra != nil && v.Electra.Message != nil {
 			return v.Electra.Message.Slot
+		}
+	case BlockVersionFulu:
+		if v.Fulu != nil && v.Fulu.Message != nil {
+			return v.Fulu.Message.Slot
 		}
 	}
 	return phase0.Slot(0)

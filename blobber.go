@@ -482,8 +482,8 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon.BeaconClientAdapter, id in
 			return false, errors.New("failed to parse response")
 		}
 
-		// Skip if not Deneb or Electra
-		if blockBlobResponse.Version != common.VersionDeneb && blockBlobResponse.Version != common.VersionElectra {
+		// Skip if not Deneb, Electra, or Fulu
+		if blockBlobResponse.Version != common.VersionDeneb && blockBlobResponse.Version != common.VersionElectra && blockBlobResponse.Version != common.VersionFulu {
 			b.logger.WithField("version", blockBlobResponse.Version).Info("Skipping non-blob version")
 			return false, nil
 		}
@@ -588,6 +588,16 @@ func ParseResponse(response []byte) (*common.VersionedBlockContents, error) {
 		return &common.VersionedBlockContents{
 			Version: version,
 			Electra: data,
+		}, nil
+
+	case common.VersionFulu:
+		data := new(apiv1electra.BlockContents)
+		if err := decoder.Decode(&data); err != nil {
+			return nil, errors.Wrap(err, "failed to decode fulu block contents")
+		}
+		return &common.VersionedBlockContents{
+			Version: version,
+			Fulu:    data,
 		}, nil
 
 	default:

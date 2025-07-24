@@ -25,7 +25,4 @@ RUN apt-get update && apt-get install -y curl
 # Ensure the binary is executable
 RUN chmod +x /blobber.bin
 
-# Add a version check
-RUN echo "Testing binary..." && /blobber.bin --help 2>&1 | head -5 || true
-
 ENTRYPOINT ["/blobber.bin"]

@@ -52,6 +52,64 @@ func TestConvertVersionedToDeneb_DenebBlock(t *testing.T) {
 	}
 }
 
+func TestConvertVersionedToDeneb_FuluBlock(t *testing.T) {
+	// Create a test Fulu block (using Electra structure)
+	fuluBlock := &apiv1electra.BlockContents{
+		Block: &electra.BeaconBlock{
+			Slot:          300,
+			ProposerIndex: 15,
+			ParentRoot:    phase0.Root{20, 21, 22},
+			StateRoot:     phase0.Root{23, 24, 25},
+			Body: &electra.BeaconBlockBody{
+				Graffiti:           [32]byte{26, 27, 28},
+				BlobKZGCommitments: []deneb.KZGCommitment{{}, {}, {}},
+			},
+		},
+		Blobs: []deneb.Blob{
+			{},
+			{},
+			{},
+		},
+		KZGProofs: []deneb.KZGProof{
+			{},
+			{},
+			{},
+		},
+	}
+
+	versioned := &VersionedBlockContents{
+		Version: "fulu",
+		Fulu:    fuluBlock,
+	}
+
+	result := ConvertVersionedToDeneb(versioned)
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	// Check that the conversion preserved the important fields
+	if result.Block.Slot != 300 {
+		t.Errorf("expected slot 300, got %d", result.Block.Slot)
+	}
+
+	if result.Block.ProposerIndex != 15 {
+		t.Errorf("expected proposer index 15, got %d", result.Block.ProposerIndex)
+	}
+
+	if result.Block.Body.Graffiti != [32]byte{26, 27, 28} {
+		t.Error("graffiti was not preserved")
+	}
+
+	if len(result.Blobs) != 3 {
+		t.Errorf("expected 3 blobs, got %d", len(result.Blobs))
+	}
+
+	if len(result.KZGProofs) != 3 {
+		t.Errorf("expected 3 KZG proofs, got %d", len(result.KZGProofs))
+	}
+}
+
 func TestConvertVersionedToDeneb_ElectraBlock(t *testing.T) {
 	// Create a test Electra block
 	electraBlock := &apiv1electra.BlockContents{
@@ -153,6 +211,16 @@ func TestVersionedBlockContents_GetSlot(t *testing.T) {
 			want: 200,
 		},
 		{
+			name: "fulu slot",
+			contents: &VersionedBlockContents{
+				Version: "fulu",
+				Fulu: &apiv1electra.BlockContents{
+					Block: &electra.BeaconBlock{Slot: 300},
+				},
+			},
+			want: 300,
+		},
+		{
 			name:     "nil contents",
 			contents: &VersionedBlockContents{},
 			want:     0,
@@ -194,6 +262,16 @@ func TestVersionedBlockContents_GetBlobsCount(t *testing.T) {
 				},
 			},
 			want: 2,
+		},
+		{
+			name: "fulu with blobs",
+			contents: &VersionedBlockContents{
+				Version: "fulu",
+				Fulu: &apiv1electra.BlockContents{
+					Blobs: []deneb.Blob{{}, {}, {}, {}},
+				},
+			},
+			want: 4,
 		},
 		{
 			name:     "no blobs",

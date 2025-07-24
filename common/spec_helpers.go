@@ -39,12 +39,15 @@ func GetForkVersion(spec map[string]interface{}, slot phase0.Slot) (phase0.Versi
 	capellaEpoch := GetSpecValue[phase0.Epoch](spec, "CAPELLA_FORK_EPOCH", phase0.Epoch(0))
 	denebEpoch := GetSpecValue[phase0.Epoch](spec, "DENEB_FORK_EPOCH", phase0.Epoch(0))
 	electraEpoch := GetSpecValue[phase0.Epoch](spec, "ELECTRA_FORK_EPOCH", phase0.Epoch(0))
+	fuluEpoch := GetSpecValue[phase0.Epoch](spec, "FULU_FORK_EPOCH", phase0.Epoch(0))
 
 	slotsPerEpoch := GetSpecValue[uint64](spec, "SLOTS_PER_EPOCH", 32)
 	epoch := phase0.Epoch(uint64(slot) / slotsPerEpoch)
 
 	// Determine fork version based on epoch
-	if electraEpoch != 0 && epoch >= electraEpoch {
+	if fuluEpoch != 0 && epoch >= fuluEpoch {
+		return GetForkVersionValue(spec, "FULU_FORK_VERSION")
+	} else if electraEpoch != 0 && epoch >= electraEpoch {
 		return GetForkVersionValue(spec, "ELECTRA_FORK_VERSION")
 	} else if denebEpoch != 0 && epoch >= denebEpoch {
 		return GetForkVersionValue(spec, "DENEB_FORK_VERSION")
