@@ -83,5 +83,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           push: true
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
