@@ -55,21 +55,10 @@ func PublishTopic(ctx context.Context, log logger.Logger, topicHandle *pubsub.To
 			lastLogTime = time.Now()
 		}
 
-		// If we've waited long enough, try publishing anyway
+		// If we've waited long enough, return an error
 		// Beacon nodes might not subscribe to topics unless they have validators
-		// But with flood publishing enabled, the message might still reach them
 		if time.Since(start) > waitTime {
-			log.WithFields(map[string]interface{}{
-				"topic":  topicHandle.String(),
-				"waited": time.Since(start).String(),
-			}).Warn("No peers subscribed to topic - beacon nodes may not subscribe without active validators. Attempting flood publish.")
-			// Try to publish anyway - with flood publishing enabled, it will reach all connected peers
-			err := topicHandle.Publish(ctx, data, opts...)
-			if err != nil {
-				return errors.Wrap(err, "failed to publish even with flood mode")
-			}
-			log.Info("Successfully published message via flood mode despite no topic subscribers")
-			return nil
+			return errors.Errorf("no peers subscribed to topic %s after waiting %s - beacon nodes may not subscribe without active validators", topicHandle.String(), time.Since(start).String())
 		}
 
 		select {

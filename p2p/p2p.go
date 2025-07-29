@@ -277,7 +277,6 @@ func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(10*1<<20), // 10 MiB
-		pubsub.WithFloodPublish(true),       // Enable flood publishing to reach more peers
 	)
 	if err != nil {
 		return nil, err
