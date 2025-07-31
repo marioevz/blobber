@@ -2,154 +2,249 @@ package p2p
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"time"
 
-	"github.com/golang/snappy"
-
 	"github.com/attestantio/go-eth2-client/spec/deneb"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	pb "github.com/libp2p/go-libp2p-pubsub/pb"
-	"github.com/marioevz/blobber/logger"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/pkg/errors"
-	fastssz "github.com/prysmaticlabs/fastssz"
 )
 
-var (
-	MESSAGE_DOMAIN_INVALID_SNAPPY = [4]byte{0x00, 0x00, 0x00, 0x00}
-	MESSAGE_DOMAIN_VALID_SNAPPY   = [4]byte{0x01, 0x00, 0x00, 0x00}
+const (
+	// Ethereum P2P protocol IDs for direct messaging
+	BeaconBlockProtocolID = "/eth2/beacon_chain/req/beacon_blocks_by_range/2/" + "ssz_snappy"
+	BlobSidecarProtocolID = "/eth2/beacon_chain/req/blob_sidecars_by_range/1/" + "ssz_snappy"
+
+	// Message send timeout for direct peer messaging
+	MessageSendTimeout = 5 * time.Second
 )
 
-func PublishTopic(ctx context.Context, log logger.Logger, topicHandle *pubsub.Topic, data []byte, opts ...pubsub.PubOpt) error {
-	// Publish the message to the topic, retrying until we have peers to send the message to
-	// or the context is cancelled
+// SendDirectMessage sends a message directly to a peer using req/resp protocol
+func (p *TestPeer) SendDirectMessage(ctx context.Context, peerID peer.ID, protocolID protocol.ID, data []byte) error {
 	start := time.Now()
-	lastLogTime := time.Now()
-	waitTime := 1 * time.Second // Wait briefly for peers, but beacon nodes might not subscribe without validators
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_id":   peerID.String(),
+			"protocol":  string(protocolID),
+			"data_size": len(data),
+		}).Debug("Opening stream for direct message send")
+	}
 
-	for {
-		topicPeers := topicHandle.ListPeers()
-		if len(topicPeers) > 0 {
-			// Log list of peers we are sending the message to
-			debugFields := map[string]interface{}{
-				"topic":       topicHandle.String(),
-				"data-length": len(data),
-				"peer_count":  len(topicPeers),
-			}
-			for i, peer := range topicPeers {
-				debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
-			}
-			log.WithFields(debugFields).Debug("sending message to peers")
-			return topicHandle.Publish(ctx, data, opts...)
+	// Create timeout context for message sending
+	msgCtx, cancel := context.WithTimeout(ctx, MessageSendTimeout)
+	defer cancel()
+
+	// Open stream with the specified protocol
+	stream, err := p.Host.NewStream(msgCtx, peerID, protocolID)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_id":  peerID.String(),
+				"protocol": string(protocolID),
+				"error":    err.Error(),
+			}).Error("Failed to open stream for direct message")
 		}
+		return errors.Wrap(err, "failed to open stream for direct message")
+	}
+	defer stream.Close()
 
-		// Log every 100ms if we're still waiting
-		if time.Since(lastLogTime) > 100*time.Millisecond {
-			log.WithFields(map[string]interface{}{
-				"topic":            topicHandle.String(),
-				"waiting_duration": time.Since(start).String(),
-				"topic_peers":      len(topicPeers),
-			}).Debug("Still waiting for peers to appear in topic")
-			lastLogTime = time.Now()
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_id":  peerID.String(),
+			"protocol": string(protocolID),
+		}).Debug("Stream opened successfully")
+	}
+
+	// Send response code (success)
+	if _, err := stream.Write([]byte{0x00}); err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_id": peerID.String(),
+				"error":   err.Error(),
+			}).Error("Failed to write response code")
 		}
+		return errors.Wrap(err, "failed to write response code")
+	}
 
-		// If we've waited long enough, return an error
-		// Beacon nodes might not subscribe to topics unless they have validators
-		if time.Since(start) > waitTime {
-			return errors.Errorf("no peers subscribed to topic %s after waiting %s - beacon nodes may not subscribe without active validators", topicHandle.String(), time.Since(start).String())
+	// Write the message data
+	bytesWritten, err := stream.Write(data)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_id":       peerID.String(),
+				"bytes_written": bytesWritten,
+				"error":         err.Error(),
+			}).Error("Failed to write message data")
 		}
+		return errors.Wrap(err, "failed to write message data")
+	}
 
-		select {
-		case <-ctx.Done():
-			return errors.Wrapf(ctx.Err(), "topic list of peers was always empty for topic %s, waited for %s", topicHandle.String(), time.Since(start))
-		case <-time.After(10 * time.Millisecond):
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_id":       peerID.String(),
+			"bytes_written": bytesWritten,
+		}).Debug("Message data written successfully")
+	}
+
+	// Close write side to signal end of message
+	if err := stream.CloseWrite(); err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_id": peerID.String(),
+				"error":   err.Error(),
+			}).Warn("Failed to close write side of stream")
 		}
 	}
+
+	// Try to read acknowledgment (optional, don't fail if peer doesn't respond)
+	respBuf := make([]byte, 1)
+	stream.SetReadDeadline(time.Now().Add(1 * time.Second))
+	if _, err := stream.Read(respBuf); err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_id": peerID.String(),
+				"error":   err.Error(),
+			}).Debug("No acknowledgment received from peer (expected)")
+		}
+	} else {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_id":  peerID.String(),
+				"response": fmt.Sprintf("0x%02x", respBuf[0]),
+			}).Debug("Received acknowledgment from peer")
+		}
+	}
+
+	duration := time.Since(start)
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_id":     peerID.String(),
+			"protocol":    string(protocolID),
+			"duration_ms": duration.Milliseconds(),
+		}).Debug("Direct message send completed")
+	}
+
+	return nil
 }
 
-func EncodeGossip(topic string, msg fastssz.Marshaler) ([]byte, []byte, error) {
-	// Returns the encoded message and the (altair) message-id
-	s := sha256.New()
-	s.Write(MESSAGE_DOMAIN_VALID_SNAPPY[:])
-
-	topicLength := make([]byte, 8)
-	binary.LittleEndian.PutUint64(topicLength, uint64(len(topic)))
-	s.Write(topicLength)
-
-	s.Write([]byte(topic))
-
-	b, err := msg.MarshalSSZ()
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to ssz-encode gossip message")
+// EncodeDirectMessage encodes a message for direct peer-to-peer transmission using SSZ
+func EncodeDirectMessage(msg interface{}) ([]byte, error) {
+	// Use SSZ network encoder for direct messages
+	if sszMsg, ok := msg.(interface{ MarshalSSZ() ([]byte, error) }); ok {
+		data, err := sszMsg.MarshalSSZ()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to marshal message to SSZ")
+		}
+		return data, nil
 	}
-	s.Write(b)
-
-	b = snappy.Encode(nil /*dst*/, b)
-	return b, s.Sum(nil)[:20], nil
+	return nil, errors.New("message does not implement SSZ marshaling")
 }
 
 func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[string]interface{}, signedBeaconBlock *deneb.SignedBeaconBlock) error {
-	// Use a longer timeout to account for topic subscription and mesh formation
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	start := time.Now()
 
-	// First check if we're connected
-	connCheckCtx, connCancel := context.WithTimeout(ctx, time.Second)
-	defer connCancel()
-	if err := p.WaitForP2PConnection(connCheckCtx); err != nil {
-		return errors.Wrap(err, "failed to wait for p2p connection")
+	// Get connected peers for direct messaging
+	connectedPeers := p.Host.Network().Peers()
+	if len(connectedPeers) == 0 {
+		if p.logger != nil {
+			p.logger.WithField("slot", signedBeaconBlock.Message.Slot).Warn("No connected peers for beacon block broadcast")
+		}
+		return errors.New("no connected peers available for broadcast")
 	}
 
-	topic := signedBeaconBlockToTopic(p.state.GetForkDigest(), sszNetworkEncoder.ProtocolSuffix())
-
-	p.logger.WithFields(map[string]interface{}{
-		"topic":           topic,
-		"fork_digest":     fmt.Sprintf("%x", p.state.GetForkDigest()),
-		"protocol_suffix": sszNetworkEncoder.ProtocolSuffix(),
-	}).Debug("Broadcasting to beacon block topic")
-
-	buf, messageID, err := EncodeGossip(topic, WrapSpecObject(spec, signedBeaconBlock))
-	if err != nil {
-		return errors.Wrap(err, "failed to encode signed beacon block deneb")
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"slot":       signedBeaconBlock.Message.Slot,
+			"peer_count": len(connectedPeers),
+		}).Info("Starting direct beacon block broadcast")
 	}
 
-	topicHandle, err := p.GetOrJoinTopic(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
-		return string(messageID)
-	}))
-	if err != nil {
-		return errors.Wrap(err, "failed to get or join topic")
-	}
-	// Don't close the topic handle here - it's managed by TestPeer now
+	// Compute block root for logging
 	blockRoot, err := signedBeaconBlock.Message.HashTreeRoot()
 	if err != nil {
 		return errors.Wrap(err, "failed to compute block root")
 	}
-	debugFields := map[string]interface{}{
-		"id":         p.ID,
-		"topic":      topic,
-		"block_root": fmt.Sprintf("%x", blockRoot),
-		"state_root": signedBeaconBlock.Message.StateRoot.String(),
-		"slot":       signedBeaconBlock.Message.Slot,
-		"signature":  signedBeaconBlock.Signature.String(),
-		"message_id": fmt.Sprintf("%x", messageID),
+
+	// Encode the block for direct transmission
+	data, err := EncodeDirectMessage(WrapSpecObject(spec, signedBeaconBlock))
+	if err != nil {
+		return errors.Wrap(err, "failed to encode signed beacon block for direct messaging")
 	}
 
-	for i, blobKzg := range signedBeaconBlock.Message.Body.BlobKZGCommitments {
-		debugFields[fmt.Sprintf("blob_kzg_commitment_%d", i)] = blobKzg.String()
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"block_root":     fmt.Sprintf("%x", blockRoot),
+			"state_root":     signedBeaconBlock.Message.StateRoot.String(),
+			"slot":           signedBeaconBlock.Message.Slot,
+			"signature":      signedBeaconBlock.Signature.String(),
+			"encoded_size":   len(data),
+			"blob_kzg_count": len(signedBeaconBlock.Message.Body.BlobKZGCommitments),
+		}).Debug("Encoded beacon block for direct broadcast")
 	}
 
-	p.logger.WithFields(debugFields).Debug("Broadcasting signed beacon block deneb")
+	// Track success/failure counts
+	successCount := 0
+	failureCount := 0
+	var lastError error
 
-	if err := PublishTopic(timeoutCtx, p.logger, topicHandle, buf); err != nil {
-		debugFields := map[string]interface{}{}
-		for i, peer := range p.Host.Network().Peers() {
-			debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
+	// Send to each connected peer directly
+	for i, peerID := range connectedPeers {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_index":  i + 1,
+				"peer_id":     peerID.String(),
+				"total_peers": len(connectedPeers),
+			}).Debug("Sending beacon block to connected peer")
 		}
-		p.logger.WithFields(debugFields).Debug("connected network peers")
-		return errors.Wrap(err, "failed to publish topic")
+
+		// Send beacon block via direct stream
+		if err := p.SendDirectMessage(ctx, peerID, protocol.ID(BeaconBlockProtocolID), data); err != nil {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"error":   err.Error(),
+				}).Warn("Failed to send beacon block to peer")
+			}
+			failureCount++
+			lastError = err
+		} else {
+			successCount++
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id":   peerID.String(),
+					"data_size": len(data),
+				}).Info("Successfully sent beacon block to peer")
+			}
+		}
+
+		// Send graceful goodbye and disconnect
+		if err := p.SendGoodbyeAndDisconnect(ctx, peerID, 1); err != nil {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"error":   err.Error(),
+				}).Warn("Failed to send goodbye and disconnect")
+			}
+		}
 	}
+
+	duration := time.Since(start)
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"slot":             signedBeaconBlock.Message.Slot,
+			"successful_peers": successCount,
+			"failed_peers":     failureCount,
+			"total_peers":      len(connectedPeers),
+			"duration_ms":      duration.Milliseconds(),
+		}).Info("Beacon block direct broadcast completed")
+	}
+
+	// Return error only if all peers failed
+	if successCount == 0 && failureCount > 0 {
+		return errors.Wrap(lastError, "failed to broadcast beacon block to any peer")
+	}
+
 	return nil
 }
 
@@ -163,17 +258,7 @@ func (p TestPeers) BroadcastSignedBeaconBlock(ctx context.Context, spec map[stri
 }
 
 func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
-	// Use a longer timeout to account for topic subscription and mesh formation
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	// First check if we're connected
-	connCheckCtx, connCancel := context.WithTimeout(ctx, time.Second)
-	defer connCancel()
-	if err := p.WaitForP2PConnection(connCheckCtx); err != nil {
-		return errors.Wrap(err, "failed to wait for p2p connection")
-	}
-
+	start := time.Now()
 	if subnet == nil {
 		// By default broadcast to the blob subnet of the index of the sidecar
 		// According to the spec, blob subnet is calculated as:
@@ -184,43 +269,115 @@ func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]int
 		subnet = &index
 	}
 
-	topic := blobSubnetToTopic(*subnet, p.state.GetForkDigest(), sszNetworkEncoder.ProtocolSuffix())
-
-	buf, messageID, err := EncodeGossip(topic, WrapSpecObject(spec, blobSidecar))
-	if err != nil {
-		return errors.Wrap(err, "failed to encode signed blob sidecar")
+	// Get connected peers for direct messaging
+	connectedPeers := p.Host.Network().Peers()
+	if len(connectedPeers) == 0 {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"index":  blobSidecar.Index,
+				"subnet": *subnet,
+				"slot":   blobSidecar.SignedBlockHeader.Message.Slot,
+			}).Warn("No connected peers for blob sidecar broadcast")
+		}
+		return errors.New("no connected peers available for broadcast")
 	}
 
-	topicHandle, err := p.GetOrJoinTopic(topic, pubsub.WithTopicMessageIdFn(func(_ *pb.Message) string {
-		return string(messageID)
-	}))
-	if err != nil {
-		return errors.Wrap(err, "failed to get or join topic")
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"index":      blobSidecar.Index,
+			"subnet":     *subnet,
+			"slot":       blobSidecar.SignedBlockHeader.Message.Slot,
+			"peer_count": len(connectedPeers),
+		}).Info("Starting direct blob sidecar broadcast")
 	}
-	// Don't close the topic handle here - it's managed by TestPeer now
 
+	// Compute block root for logging
 	blockRoot, err := blobSidecar.SignedBlockHeader.Message.HashTreeRoot()
 	if err != nil {
 		return errors.Wrap(err, "failed to compute block root")
 	}
-	p.logger.WithFields(map[string]interface{}{
-		"id":             p.ID,
-		"topic":          topic,
-		"block_root":     fmt.Sprintf("%x", blockRoot),
-		"index":          blobSidecar.Index,
-		"slot":           blobSidecar.SignedBlockHeader.Message.Slot,
-		"kzg_commitment": blobSidecar.KZGCommitment.String(),
-		"message_id":     fmt.Sprintf("%x", messageID),
-	}).Debug("Broadcasting blob sidecar with signed block header")
 
-	if err := PublishTopic(timeoutCtx, p.logger, topicHandle, buf); err != nil {
-		debugFields := map[string]interface{}{}
-		for i, peer := range p.Host.Network().Peers() {
-			debugFields[fmt.Sprintf("peer_%d", i)] = peer.String()
-		}
-		p.logger.WithFields(debugFields).Debug("connected network peers")
-		return errors.Wrap(err, "failed to publish topic")
+	// Encode the blob sidecar for direct transmission
+	data, err := EncodeDirectMessage(WrapSpecObject(spec, blobSidecar))
+	if err != nil {
+		return errors.Wrap(err, "failed to encode blob sidecar for direct messaging")
 	}
+
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"block_root":     fmt.Sprintf("%x", blockRoot),
+			"index":          blobSidecar.Index,
+			"slot":           blobSidecar.SignedBlockHeader.Message.Slot,
+			"kzg_commitment": blobSidecar.KZGCommitment.String(),
+			"encoded_size":   len(data),
+		}).Debug("Encoded blob sidecar for direct broadcast")
+	}
+
+	// Track success/failure counts
+	successCount := 0
+	failureCount := 0
+	var lastError error
+
+	// Send to each connected peer directly
+	for i, peerID := range connectedPeers {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_index":  i + 1,
+				"peer_id":     peerID.String(),
+				"total_peers": len(connectedPeers),
+				"subnet":      *subnet,
+			}).Debug("Sending blob sidecar to connected peer")
+		}
+
+		// Send blob sidecar via direct stream
+		if err := p.SendDirectMessage(ctx, peerID, protocol.ID(BlobSidecarProtocolID), data); err != nil {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"error":   err.Error(),
+				}).Warn("Failed to send blob sidecar to peer")
+			}
+			failureCount++
+			lastError = err
+		} else {
+			successCount++
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id":   peerID.String(),
+					"data_size": len(data),
+				}).Info("Successfully sent blob sidecar to peer")
+			}
+		}
+
+		// Send graceful goodbye and disconnect
+		if err := p.SendGoodbyeAndDisconnect(ctx, peerID, 1); err != nil {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"error":   err.Error(),
+				}).Warn("Failed to send goodbye and disconnect")
+			}
+		}
+	}
+
+	duration := time.Since(start)
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"index":            blobSidecar.Index,
+			"subnet":           *subnet,
+			"slot":             blobSidecar.SignedBlockHeader.Message.Slot,
+			"successful_peers": successCount,
+			"failed_peers":     failureCount,
+			"total_peers":      len(connectedPeers),
+			"duration_ms":      duration.Milliseconds(),
+		}).Info("Blob sidecar direct broadcast completed")
+	}
+
+	// Return error only if all peers failed
+	if successCount == 0 && failureCount > 0 {
+		return errors.Wrap(lastError, "failed to broadcast blob sidecar to any peer")
+	}
+
 	return nil
 }
 
@@ -251,10 +408,8 @@ func (p TestPeers) BroadcastBlobSidecars(ctx context.Context, spec map[string]in
 	return nil
 }
 
-func signedBeaconBlockToTopic(forkDigest [4]byte, protocolSuffix string) string {
-	return fmt.Sprintf("/eth2/%x/beacon_block", forkDigest) + protocolSuffix
-}
-
-func blobSubnetToTopic(subnet uint64, forkDigest [4]byte, protocolSuffix string) string {
-	return fmt.Sprintf("/eth2/%x/blob_sidecar_%d", forkDigest, subnet) + protocolSuffix
+// Log removal of flood gossip mechanisms
+func init() {
+	// Remove flood gossip/pubsub logic - replaced with direct peer messaging
+	// Old topic-based broadcasting has been replaced with req/resp protocol streams
 }

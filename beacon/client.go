@@ -166,6 +166,14 @@ func (c *Client) BeaconBlock(ctx context.Context, blockID string) (*phase0.Signe
 		if response.Data.Deneb != nil {
 			return nil, fmt.Errorf("deneb blocks not yet supported")
 		}
+	case spec.DataVersionElectra:
+		if response.Data.Electra != nil {
+			return nil, fmt.Errorf("electra blocks not yet supported")
+		}
+	case spec.DataVersionFulu:
+		if response.Data.Fulu != nil {
+			return nil, fmt.Errorf("fulu blocks not yet supported")
+		}
 	}
 
 	return nil, fmt.Errorf("unknown block version")

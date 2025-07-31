@@ -24,6 +24,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	ma "github.com/multiformats/go-multiaddr"
 	"github.com/pkg/errors"
 	bitfield "github.com/prysmaticlabs/go-bitfield"
 
@@ -38,6 +39,9 @@ const (
 	GoodbyeProtocolID  = "/eth2/beacon_chain/req/goodbye/1/" + encoder.ProtocolSuffixSSZSnappy
 	PingProtocolID     = "/eth2/beacon_chain/req/ping/1/" + encoder.ProtocolSuffixSSZSnappy
 	MetaDataProtocolID = "/eth2/beacon_chain/req/metadata/2/" + encoder.ProtocolSuffixSSZSnappy
+
+	// Connection timeout for direct peer messaging
+	DirectConnectionTimeout = 10 * time.Second
 )
 
 const pubsubQueueSize = 600
@@ -851,6 +855,220 @@ func (p *TestPeer) GetOrJoinTopic(topic string, opts ...pubsub.TopicOpt) (*pubsu
 	}
 
 	return handle, nil
+}
+
+// ConnectToPeerTemporarily connects to a peer temporarily for direct messaging
+func (p *TestPeer) ConnectToPeerTemporarily(ctx context.Context, peerAddr string) (peer.ID, error) {
+	start := time.Now()
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_addr": peerAddr,
+		}).Debug("Attempting temporary connection to peer")
+	}
+
+	// Parse multiaddr
+	maddr, err := ma.NewMultiaddr(peerAddr)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_addr": peerAddr,
+				"error":     err.Error(),
+			}).Error("Failed to parse peer multiaddr")
+		}
+		return "", errors.Wrap(err, "failed to parse peer multiaddr")
+	}
+
+	// Extract peer ID from multiaddr
+	addrInfo, err := peer.AddrInfoFromP2pAddr(maddr)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_addr": peerAddr,
+				"error":     err.Error(),
+			}).Error("Failed to extract peer ID from multiaddr")
+		}
+		return "", errors.Wrap(err, "failed to extract peer ID from multiaddr")
+	}
+
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_addr": peerAddr,
+			"peer_id":   addrInfo.ID.String(),
+		}).Debug("Extracted peer ID from multiaddr")
+	}
+
+	// Check if already connected
+	if p.Host.Network().Connectedness(addrInfo.ID) == network.Connected {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_id": addrInfo.ID.String(),
+			}).Debug("Already connected to peer")
+		}
+		return addrInfo.ID, nil
+	}
+
+	// Connect with timeout
+	connCtx, cancel := context.WithTimeout(ctx, DirectConnectionTimeout)
+	defer cancel()
+
+	if err := p.Host.Connect(connCtx, *addrInfo); err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_addr": peerAddr,
+				"peer_id":   addrInfo.ID.String(),
+				"error":     err.Error(),
+			}).Error("Failed to connect to peer")
+		}
+		return "", errors.Wrap(err, "failed to connect to peer")
+	}
+
+	duration := time.Since(start)
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_addr":   peerAddr,
+			"peer_id":     addrInfo.ID.String(),
+			"duration_ms": duration.Milliseconds(),
+		}).Info("Successfully connected to peer")
+	}
+
+	return addrInfo.ID, nil
+}
+
+// SendGoodbyeAndDisconnect sends a graceful goodbye message and disconnects from peer
+func (p *TestPeer) SendGoodbyeAndDisconnect(ctx context.Context, peerID peer.ID, reason uint64) error {
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_id": peerID.String(),
+			"reason":  reason,
+		}).Debug("Sending goodbye message to peer")
+	}
+
+	// Send goodbye message with timeout
+	goodbyeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	// Open stream for goodbye
+	s, err := p.Host.NewStream(goodbyeCtx, peerID, GoodbyeProtocolID)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_id": peerID.String(),
+				"error":   err.Error(),
+			}).Warn("Failed to open goodbye stream (proceeding with disconnect)")
+		}
+		// Continue with disconnect even if goodbye fails
+	} else {
+		// Send goodbye message
+		goodbyeMsg := Goodbye(reason)
+		if _, err := s.Write([]byte{0x00}); err != nil {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"error":   err.Error(),
+				}).Warn("Failed to write goodbye response code")
+			}
+		} else if _, err := sszNetworkEncoder.EncodeWithMaxLength(s, WrapSSZObject(&goodbyeMsg)); err != nil {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"error":   err.Error(),
+				}).Warn("Failed to encode goodbye message")
+			}
+		} else {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"reason":  reason,
+				}).Debug("Goodbye message sent successfully")
+			}
+		}
+
+		// Close write side and try to read acknowledgment
+		if err := s.CloseWrite(); err != nil {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"error":   err.Error(),
+				}).Debug("Failed to close write side of goodbye stream")
+			}
+		}
+
+		// Try to read acknowledgment with timeout
+		s.SetReadDeadline(time.Now().Add(1 * time.Second))
+		respBuf := make([]byte, 1)
+		if _, err := s.Read(respBuf); err != nil {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"error":   err.Error(),
+				}).Debug("No acknowledgment received for goodbye (expected)")
+			}
+		} else {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+				}).Debug("Goodbye acknowledgment received")
+			}
+		}
+
+		// Close the stream
+		if err := s.Close(); err != nil {
+			if p.logger != nil {
+				p.logger.WithFields(map[string]interface{}{
+					"peer_id": peerID.String(),
+					"error":   err.Error(),
+				}).Debug("Failed to close goodbye stream")
+			}
+		}
+	}
+
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_id": peerID.String(),
+		}).Debug("Closing all streams to peer")
+	}
+
+	// Close all streams to the peer
+	connections := p.Host.Network().ConnsToPeer(peerID)
+	for _, conn := range connections {
+		streams := conn.GetStreams()
+		for _, stream := range streams {
+			if err := stream.Close(); err != nil {
+				if p.logger != nil {
+					p.logger.WithFields(map[string]interface{}{
+						"peer_id":   peerID.String(),
+						"stream_id": stream.ID(),
+						"error":     err.Error(),
+					}).Debug("Failed to close stream")
+				}
+			}
+		}
+	}
+
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_id": peerID.String(),
+		}).Info("Disconnecting from peer")
+	}
+
+	// Disconnect from the peer
+	if err := p.Host.Network().ClosePeer(peerID); err != nil {
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"peer_id": peerID.String(),
+				"error":   err.Error(),
+			}).Warn("Failed to close peer connection")
+		}
+		return errors.Wrap(err, "failed to close peer connection")
+	}
+
+	if p.logger != nil {
+		p.logger.WithFields(map[string]interface{}{
+			"peer_id": peerID.String(),
+		}).Debug("Peer disconnection complete")
+	}
+
+	return nil
 }
 
 func (p *TestPeer) Goodbye(ctx context.Context, peer peer.ID) error {

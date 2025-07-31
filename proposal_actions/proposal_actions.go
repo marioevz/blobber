@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
 	"github.com/attestantio/go-eth2-client/spec/deneb"
@@ -14,6 +15,7 @@ import (
 	"github.com/marioevz/blobber/kzg"
 	"github.com/marioevz/blobber/p2p"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 const MAX_BLOBS_PER_BLOCK = 6
@@ -212,25 +214,62 @@ func (s Default) Execute(
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
+	start := time.Now()
+	logrus.WithFields(logrus.Fields{
+		"action":      s.Name(),
+		"slot":        beaconBlockContents.Block.Slot,
+		"peer_count":  len(testPeers),
+		"blobs_first": s.BroadcastBlobsFirst,
+	}).Info("Executing default proposal action")
+
+	// Log connected peer information from P2P layer
+	for i, peer := range testPeers {
+		connectedPeers := peer.Host.Network().Peers()
+		logrus.WithFields(logrus.Fields{
+			"peer_index":      i,
+			"connected_peers": len(connectedPeers),
+		}).Debug("P2P peer connection status for default action")
+	}
+
 	// Sign block and create sidecars
 	signedBlockBlobsBundle, err := CreatedSignedBlockSidecarsBundle(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action": s.Name(),
+			"slot":   beaconBlockContents.Block.Slot,
+		}).Error("Failed to create and sign block and blobs for default action")
 		return false, errors.Wrap(err, "failed to create and sign block and blobs")
 	}
 
-	// Broadcast the signed block and blobs
+	// Broadcast the signed block and blobs using direct P2P messaging
 	broadcaster := BundleBroadcaster{
 		Spec:       spec,
 		Peers:      testPeers,
 		BlobsFirst: s.BroadcastBlobsFirst,
 	}
 	if err = broadcaster.Broadcast(signedBlockBlobsBundle); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action":     s.Name(),
+			"slot":       beaconBlockContents.Block.Slot,
+			"peer_count": len(testPeers),
+		}).Error("Failed to broadcast via direct P2P messaging for default action")
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block and blob sidecars")
 	}
+
 	if !s.SlotMiss(spec) {
 		// Add the blobs to the must-include blob record
 		includeBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundle.BlobSidecars...)
 	}
+
+	duration := time.Since(start)
+	logrus.WithFields(logrus.Fields{
+		"action":      s.Name(),
+		"slot":        beaconBlockContents.Block.Slot,
+		"peer_count":  len(testPeers),
+		"duration_ms": duration.Milliseconds(),
+		"blob_count":  len(signedBlockBlobsBundle.BlobSidecars),
+	}).Info("Default proposal action completed successfully")
+
 	return true, nil
 }
 
@@ -288,26 +327,72 @@ func (s BlobGossipDelay) Execute(
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
+	start := time.Now()
+	logrus.WithFields(logrus.Fields{
+		"action":      s.Name(),
+		"slot":        beaconBlockContents.Block.Slot,
+		"peer_count":  len(testPeers),
+		"delay_ms":    s.DelayMilliseconds,
+		"blobs_first": s.BroadcastBlobsFirst,
+	}).Info("Executing blob gossip delay proposal action")
+
+	// Log connected peer information from P2P layer
+	for i, peer := range testPeers {
+		connectedPeers := peer.Host.Network().Peers()
+		logrus.WithFields(logrus.Fields{
+			"peer_index":      i,
+			"connected_peers": len(connectedPeers),
+		}).Debug("P2P peer connection status for blob gossip delay action")
+	}
+
 	// Sign block and create sidecars
 	signedBlockBlobsBundle, err := CreatedSignedBlockSidecarsBundle(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action": s.Name(),
+			"slot":   beaconBlockContents.Block.Slot,
+		}).Error("Failed to create and sign block and blobs for blob gossip delay action")
 		return false, errors.Wrap(err, "failed to create and sign block and blobs")
 	}
 
-	// Broadcast the signed block and blobs
+	// Broadcast the signed block and blobs using direct P2P messaging with delay
 	broadcaster := BundleBroadcaster{
 		Spec:              spec,
 		Peers:             testPeers,
 		BlobsFirst:        s.BroadcastBlobsFirst,
 		DelayMilliseconds: s.DelayMilliseconds,
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"action":   s.Name(),
+		"delay_ms": s.DelayMilliseconds,
+	}).Info("Applying configured delay before broadcast")
+
 	if err = broadcaster.Broadcast(signedBlockBlobsBundle); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action":     s.Name(),
+			"slot":       beaconBlockContents.Block.Slot,
+			"peer_count": len(testPeers),
+			"delay_ms":   s.DelayMilliseconds,
+		}).Error("Failed to broadcast via direct P2P messaging for blob gossip delay action")
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block and blob sidecars")
 	}
+
 	if !s.SlotMiss(spec) {
 		// Add the blobs to the must-include blob record
 		includeBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundle.BlobSidecars...)
 	}
+
+	duration := time.Since(start)
+	logrus.WithFields(logrus.Fields{
+		"action":      s.Name(),
+		"slot":        beaconBlockContents.Block.Slot,
+		"peer_count":  len(testPeers),
+		"duration_ms": duration.Milliseconds(),
+		"delay_ms":    s.DelayMilliseconds,
+		"blob_count":  len(signedBlockBlobsBundle.BlobSidecars),
+	}).Info("Blob gossip delay proposal action completed successfully")
+
 	return true, nil
 }
 
@@ -366,12 +451,39 @@ func (s EquivocatingBlobSidecars) Execute(
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
+	start := time.Now()
+	logrus.WithFields(logrus.Fields{
+		"action":      s.Name(),
+		"slot":        beaconBlockContents.Block.Slot,
+		"peer_count":  len(testPeers),
+		"blobs_first": s.BroadcastBlobsFirst,
+	}).Info("Executing equivocating blob sidecars proposal action")
+
 	if len(testPeers) != 2 {
+		logrus.WithFields(logrus.Fields{
+			"action":         s.Name(),
+			"expected_peers": 2,
+			"actual_peers":   len(testPeers),
+		}).Error("Incorrect number of test peers for equivocating blob sidecars action")
 		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
 	}
+
+	// Log connected peer information from P2P layer
+	for i, peer := range testPeers {
+		connectedPeers := peer.Host.Network().Peers()
+		logrus.WithFields(logrus.Fields{
+			"peer_index":      i,
+			"connected_peers": len(connectedPeers),
+		}).Debug("P2P peer connection status for equivocating blob sidecars action")
+	}
+
 	// Sign the blocks (original and equivocating) and generate the sidecars
 	signedBlockBlobsBundles, err := CreateSignEquivocatingBlock(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action": s.Name(),
+			"slot":   beaconBlockContents.Block.Slot,
+		}).Error("Failed to create and sign equivocating block")
 		return false, errors.Wrap(err, "failed to create and sign equivocating block")
 	}
 
@@ -385,15 +497,35 @@ func (s EquivocatingBlobSidecars) Execute(
 	// The correct blobs are the ones generated by the original block
 	correctBlobsSignedBlockBundle := signedBlockBlobsBundles[0]
 
-	// Broadcast the signed block and blobs
+	logrus.WithFields(logrus.Fields{
+		"action":             s.Name(),
+		"equiv_blob_count":   len(equivBlobsSignedBlockBundle.BlobSidecars),
+		"correct_blob_count": len(correctBlobsSignedBlockBundle.BlobSidecars),
+	}).Debug("Prepared equivocating and correct blob sidecar bundles")
+
+	// Broadcast the signed block and blobs using direct P2P messaging
 	broadcaster := BundleBroadcaster{
 		Spec:       spec,
 		Peers:      testPeers,
 		BlobsFirst: s.BroadcastBlobsFirst,
 	}
 	if err := broadcaster.Broadcast(equivBlobsSignedBlockBundle, correctBlobsSignedBlockBundle); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action":     s.Name(),
+			"slot":       beaconBlockContents.Block.Slot,
+			"peer_count": len(testPeers),
+		}).Error("Failed to broadcast equivocating blob sidecars via direct P2P messaging")
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
+
+	duration := time.Since(start)
+	logrus.WithFields(logrus.Fields{
+		"action":       s.Name(),
+		"slot":         beaconBlockContents.Block.Slot,
+		"peer_count":   len(testPeers),
+		"duration_ms":  duration.Milliseconds(),
+		"bundle_count": 2,
+	}).Info("Equivocating blob sidecars proposal action completed successfully")
 
 	return true, nil
 }
@@ -460,28 +592,79 @@ func (s InvalidEquivocatingBlockAndBlobs) Execute(
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
+	start := time.Now()
+	logrus.WithFields(logrus.Fields{
+		"action":               s.Name(),
+		"slot":                 beaconBlockContents.Block.Slot,
+		"peer_count":           len(testPeers),
+		"blobs_first":          s.BroadcastBlobsFirst,
+		"alternate_recipients": s.AlternateRecipients,
+	}).Info("Executing invalid equivocating block and blobs proposal action")
+
 	if len(testPeers) != 2 {
+		logrus.WithFields(logrus.Fields{
+			"action":         s.Name(),
+			"expected_peers": 2,
+			"actual_peers":   len(testPeers),
+		}).Error("Incorrect number of test peers for invalid equivocating block and blobs action")
 		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
 	}
+
+	// Log connected peer information from P2P layer
+	for i, peer := range testPeers {
+		connectedPeers := peer.Host.Network().Peers()
+		logrus.WithFields(logrus.Fields{
+			"peer_index":      i,
+			"connected_peers": len(connectedPeers),
+		}).Debug("P2P peer connection status for invalid equivocating block and blobs action")
+	}
+
 	// Sign the blocks (original and equivocating) and generate the sidecars
 	signedBlockBlobsBundles, err := CreateSignEquivocatingBlock(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action": s.Name(),
+			"slot":   beaconBlockContents.Block.Slot,
+		}).Error("Failed to create and sign equivocating block")
 		return false, errors.Wrap(err, "failed to create and sign equivocating block")
 	}
 
 	if s.AlternateRecipients && (beaconBlockContents.Block.Slot%2 == 0) {
+		logrus.WithFields(logrus.Fields{
+			"action": s.Name(),
+			"slot":   beaconBlockContents.Block.Slot,
+		}).Debug("Alternating recipients due to even slot number")
 		signedBlockBlobsBundles[0], signedBlockBlobsBundles[1] = signedBlockBlobsBundles[1], signedBlockBlobsBundles[0]
 	}
 
-	// Broadcast the signed block and blobs
+	logrus.WithFields(logrus.Fields{
+		"action":       s.Name(),
+		"bundle_count": len(signedBlockBlobsBundles),
+	}).Debug("Prepared equivocating block and blob bundles")
+
+	// Broadcast the signed block and blobs using direct P2P messaging
 	broadcaster := BundleBroadcaster{
 		Spec:       spec,
 		Peers:      testPeers,
 		BlobsFirst: s.BroadcastBlobsFirst,
 	}
 	if err := broadcaster.Broadcast(signedBlockBlobsBundles...); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action":     s.Name(),
+			"slot":       beaconBlockContents.Block.Slot,
+			"peer_count": len(testPeers),
+		}).Error("Failed to broadcast invalid equivocating block and blobs via direct P2P messaging")
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
+
+	duration := time.Since(start)
+	logrus.WithFields(logrus.Fields{
+		"action":       s.Name(),
+		"slot":         beaconBlockContents.Block.Slot,
+		"peer_count":   len(testPeers),
+		"duration_ms":  duration.Milliseconds(),
+		"bundle_count": len(signedBlockBlobsBundles),
+	}).Info("Invalid equivocating block and blobs proposal action completed successfully")
 
 	return true, nil
 }
@@ -536,9 +719,30 @@ func (s EquivocatingBlockHeaderInBlobs) Execute(
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
+	start := time.Now()
+	logrus.WithFields(logrus.Fields{
+		"action":      s.Name(),
+		"slot":        beaconBlockContents.Block.Slot,
+		"peer_count":  len(testPeers),
+		"blobs_first": s.BroadcastBlobsFirst,
+	}).Info("Executing equivocating block header in blobs proposal action")
+
+	// Log connected peer information from P2P layer
+	for i, peer := range testPeers {
+		connectedPeers := peer.Host.Network().Peers()
+		logrus.WithFields(logrus.Fields{
+			"peer_index":      i,
+			"connected_peers": len(connectedPeers),
+		}).Debug("P2P peer connection status for equivocating block header in blobs action")
+	}
+
 	// Sign the blocks (original and equivocating) and generate the sidecars
 	signedBlockBlobsBundles, err := CreateSignEquivocatingBlock(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action": s.Name(),
+			"slot":   beaconBlockContents.Block.Slot,
+		}).Error("Failed to create and sign equivocating block")
 		return false, errors.Wrap(err, "failed to create and sign equivocating block")
 	}
 
@@ -549,19 +753,43 @@ func (s EquivocatingBlockHeaderInBlobs) Execute(
 		BlobSidecars: signedBlockBlobsBundles[1].BlobSidecars,
 	}
 
-	// Broadcast the signed block and blobs
+	logrus.WithFields(logrus.Fields{
+		"action":                        s.Name(),
+		"original_block_blob_count":     len(signedBlockBlobsBundles[0].BlobSidecars),
+		"equivocating_block_blob_count": len(signedBlockBlobsBundles[1].BlobSidecars),
+	}).Debug("Created mixed bundle with original block and equivocating blob sidecars")
+
+	// Broadcast the signed block and blobs using direct P2P messaging
 	broadcaster := BundleBroadcaster{
 		Spec:       spec,
 		Peers:      testPeers,
 		BlobsFirst: s.BroadcastBlobsFirst,
 	}
 	if err := broadcaster.Broadcast(signedBlockSidecarBundle); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action":     s.Name(),
+			"slot":       beaconBlockContents.Block.Slot,
+			"peer_count": len(testPeers),
+		}).Error("Failed to broadcast equivocating block header in blobs via direct P2P messaging")
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
 	// Add the blobs to the must-reject blob record
 	rejectBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundles[0].BlobSidecars...)
 	rejectBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundles[1].BlobSidecars...)
+
+	logrus.WithFields(logrus.Fields{
+		"action":              s.Name(),
+		"rejected_blob_count": len(signedBlockBlobsBundles[0].BlobSidecars) + len(signedBlockBlobsBundles[1].BlobSidecars),
+	}).Debug("Added blob sidecars to reject record")
+
+	duration := time.Since(start)
+	logrus.WithFields(logrus.Fields{
+		"action":      s.Name(),
+		"slot":        beaconBlockContents.Block.Slot,
+		"peer_count":  len(testPeers),
+		"duration_ms": duration.Milliseconds(),
+	}).Info("Equivocating block header in blobs proposal action completed successfully")
 
 	return true, nil
 }
@@ -610,38 +838,89 @@ func (s InvalidEquivocatingBlock) Execute(
 	includeBlobRecord *common.BlobRecord,
 	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
+	start := time.Now()
+	logrus.WithFields(logrus.Fields{
+		"action":     s.Name(),
+		"slot":       beaconBlockContents.Block.Slot,
+		"peer_count": len(testPeers),
+	}).Info("Executing invalid equivocating block proposal action")
+
 	if len(testPeers) != 2 {
+		logrus.WithFields(logrus.Fields{
+			"action":         s.Name(),
+			"expected_peers": 2,
+			"actual_peers":   len(testPeers),
+		}).Error("Incorrect number of test peers for invalid equivocating block action")
 		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
 	}
+
+	// Log connected peer information from P2P layer
+	for i, peer := range testPeers {
+		connectedPeers := peer.Host.Network().Peers()
+		logrus.WithFields(logrus.Fields{
+			"peer_index":      i,
+			"connected_peers": len(connectedPeers),
+		}).Debug("P2P peer connection status for invalid equivocating block action")
+	}
+
 	// Sign the blocks (original and equivocating) and generate the sidecars
 	signedBlockBlobsBundles, err := CreateSignEquivocatingBlock(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
 	if err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action": s.Name(),
+			"slot":   beaconBlockContents.Block.Slot,
+		}).Error("Failed to create and sign equivocating block")
 		return false, errors.Wrap(err, "failed to create and sign equivocating block")
 	}
 
 	correctBlockBundle, equivocatingBlockBundle := signedBlockBlobsBundles[0], signedBlockBlobsBundles[1]
 
-	// Create a bundle of the original block but use the sidecars generated by the
-	// equivocating block
+	// Create a bundle of the equivocating block but use the sidecars generated by the
+	// correct block
 	signedBlockSidecarBundle := &SignedBlockSidecarsBundle{
 		SignedBlock:  equivocatingBlockBundle.SignedBlock,
 		BlobSidecars: correctBlockBundle.BlobSidecars,
 	}
 
-	// Broadcast the signed block and blobs
+	logrus.WithFields(logrus.Fields{
+		"action":                        s.Name(),
+		"correct_block_blob_count":      len(correctBlockBundle.BlobSidecars),
+		"equivocating_block_blob_count": len(equivocatingBlockBundle.BlobSidecars),
+		"mixed_bundle_blob_count":       len(signedBlockSidecarBundle.BlobSidecars),
+	}).Debug("Created mixed bundle with equivocating block and correct blob sidecars")
+
+	// Broadcast the signed block and blobs using direct P2P messaging (blobs first)
 	broadcaster := BundleBroadcaster{
 		Spec:       spec,
 		Peers:      testPeers,
 		BlobsFirst: true,
 	}
 	if err := broadcaster.Broadcast(signedBlockSidecarBundle, correctBlockBundle); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"action":     s.Name(),
+			"slot":       beaconBlockContents.Block.Slot,
+			"peer_count": len(testPeers),
+		}).Error("Failed to broadcast invalid equivocating block via direct P2P messaging")
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
 	if !s.SlotMiss(spec) {
 		// Add the blobs to the must-include blob record
 		includeBlobRecord.Add(beaconBlockContents.Block.Slot, correctBlockBundle.BlobSidecars...)
+		logrus.WithFields(logrus.Fields{
+			"action":     s.Name(),
+			"blob_count": len(correctBlockBundle.BlobSidecars),
+		}).Debug("Added correct blob sidecars to include record")
 	}
+
+	duration := time.Since(start)
+	logrus.WithFields(logrus.Fields{
+		"action":       s.Name(),
+		"slot":         beaconBlockContents.Block.Slot,
+		"peer_count":   len(testPeers),
+		"duration_ms":  duration.Milliseconds(),
+		"bundle_count": 2,
+	}).Info("Invalid equivocating block proposal action completed successfully")
 
 	return true, nil
 }
