@@ -784,6 +784,110 @@ func (p *TestPeer) SetupStreams(ctx context.Context) error {
 		}
 	})
 
+	// BeaconBlocksBy range handler
+	if p.logger != nil {
+		p.logger.Debug("Setting up beacon blocks by range handler")
+	}
+	p.Host.SetStreamHandler(BeaconBlockProtocolID, func(s network.Stream) {
+		defer func() {
+			if p.logger != nil {
+				p.logger.Debug("Finished responding to beacon blocks by range request")
+			}
+		}()
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":       p.ID,
+				"protocol": s.Protocol(),
+				"peer":     s.Conn().RemotePeer().String(),
+			}).Debug("Got a new beacon blocks by range stream")
+		}
+
+		// Read the incoming beacon block data (we don't need to parse it for testing)
+		data := make([]byte, 10*1024*1024) // 10MB buffer for beacon block data
+		n, err := s.Read(data)
+		if err != nil && err != io.EOF {
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to read beacon block data")
+			}
+			return
+		}
+
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":        p.ID,
+				"protocol":  s.Protocol(),
+				"peer":      s.Conn().RemotePeer().String(),
+				"data_size": n,
+			}).Debug("Received beacon block data")
+		}
+
+		// Send acknowledgment response
+		if _, err := s.Write([]byte{0x00}); err != nil {
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to send beacon block acknowledgment")
+			}
+			return
+		}
+
+		if err := s.Close(); err != nil {
+			if p.logger != nil {
+				p.logger.WithField("error", err).Debug("Beacon block stream close error")
+			}
+		}
+	})
+
+	// BlobSidecarsByRange handler
+	if p.logger != nil {
+		p.logger.Debug("Setting up blob sidecars by range handler")
+	}
+	p.Host.SetStreamHandler(BlobSidecarProtocolID, func(s network.Stream) {
+		defer func() {
+			if p.logger != nil {
+				p.logger.Debug("Finished responding to blob sidecars by range request")
+			}
+		}()
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":       p.ID,
+				"protocol": s.Protocol(),
+				"peer":     s.Conn().RemotePeer().String(),
+			}).Debug("Got a new blob sidecars by range stream")
+		}
+
+		// Read the incoming blob sidecar data (we don't need to parse it for testing)
+		data := make([]byte, 150*1024*1024) // 150MB buffer for blob sidecar data (blobs can be large)
+		n, err := s.Read(data)
+		if err != nil && err != io.EOF {
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to read blob sidecar data")
+			}
+			return
+		}
+
+		if p.logger != nil {
+			p.logger.WithFields(map[string]interface{}{
+				"id":        p.ID,
+				"protocol":  s.Protocol(),
+				"peer":      s.Conn().RemotePeer().String(),
+				"data_size": n,
+			}).Debug("Received blob sidecar data")
+		}
+
+		// Send acknowledgment response
+		if _, err := s.Write([]byte{0x00}); err != nil {
+			if p.logger != nil {
+				p.logger.WithField("error", err).Error("Failed to send blob sidecar acknowledgment")
+			}
+			return
+		}
+
+		if err := s.Close(); err != nil {
+			if p.logger != nil {
+				p.logger.WithField("error", err).Debug("Blob sidecar stream close error")
+			}
+		}
+	})
+
 	return nil
 }
 

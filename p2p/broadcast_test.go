@@ -12,6 +12,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/holiman/uint256"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -20,6 +21,28 @@ import (
 
 	"github.com/marioevz/blobber/p2p"
 )
+
+// registerTestProtocolHandler registers a simple echo handler for test protocols
+func registerTestProtocolHandler(peer *p2p.TestPeer, protocolID protocol.ID) {
+	peer.Host.SetStreamHandler(protocolID, func(s network.Stream) {
+		defer s.Close()
+
+		// Read all data from the stream
+		buf := make([]byte, 1024*1024) // 1MB buffer
+		n, err := s.Read(buf)
+		if err != nil && err.Error() != "EOF" {
+			return
+		}
+
+		// Send success response code
+		s.Write([]byte{0x00})
+
+		// Echo back the data (optional, for testing)
+		if n > 0 {
+			s.Write(buf[:n])
+		}
+	})
+}
 
 func TestDirectMessageSending(t *testing.T) {
 	tests := []struct {
@@ -64,6 +87,10 @@ func TestDirectMessageSending(t *testing.T) {
 			sender := peers[0]
 			receiver := peers[1]
 
+			// Register test protocol handler on receiver
+			protocolID := protocol.ID("/test/direct/1/ssz_snappy")
+			registerTestProtocolHandler(receiver, protocolID)
+
 			// Connect sender to receiver
 			receiverID := receiver.Host.ID()
 			receiverAddr := receiver.Host.Addrs()[0]
@@ -80,7 +107,6 @@ func TestDirectMessageSending(t *testing.T) {
 			}
 
 			// Send direct message
-			protocolID := protocol.ID("/test/direct/1/ssz_snappy")
 			err = sender.SendDirectMessage(ctx, receiverID, protocolID, testData)
 
 			if tt.expectError {
@@ -204,6 +230,11 @@ func TestConnectionCleanup(t *testing.T) {
 	receiver1 := peers[1]
 	receiver2 := peers[2]
 
+	// Register test protocol handler on all receivers
+	protocolID := protocol.ID("/test/cleanup/1/ssz_snappy")
+	registerTestProtocolHandler(receiver1, protocolID)
+	registerTestProtocolHandler(receiver2, protocolID)
+
 	// Connect to multiple peers
 	receivers := []*p2p.TestPeer{receiver1, receiver2}
 	receiverIDs := make([]peer.ID, len(receivers))
@@ -228,7 +259,6 @@ func TestConnectionCleanup(t *testing.T) {
 	for i, receiverID := range receiverIDs {
 		// Send a message
 		testData := []byte("test message")
-		protocolID := protocol.ID("/test/cleanup/1/ssz_snappy")
 		err := sender.SendDirectMessage(ctx, receiverID, protocolID, testData)
 		require.NoError(t, err, "Failed to send message to peer %d", i)
 
@@ -512,16 +542,25 @@ func TestBroadcastSignedBeaconBlockDirect(t *testing.T) {
 			ParentRoot:    phase0.Root{0x01},
 			StateRoot:     phase0.Root{0x02},
 			Body: &deneb.BeaconBlockBody{
-				RANDAOReveal:          phase0.BLSSignature{},
-				ETH1Data:              &phase0.ETH1Data{},
-				Graffiti:              [32]byte{},
-				ProposerSlashings:     []*phase0.ProposerSlashing{},
-				AttesterSlashings:     []*phase0.AttesterSlashing{},
-				Attestations:          []*phase0.Attestation{},
-				Deposits:              []*phase0.Deposit{},
-				VoluntaryExits:        []*phase0.SignedVoluntaryExit{},
-				SyncAggregate:         &altair.SyncAggregate{},
-				ExecutionPayload:      &deneb.ExecutionPayload{},
+				RANDAOReveal: phase0.BLSSignature{},
+				ETH1Data: &phase0.ETH1Data{
+					DepositRoot:  phase0.Root{0x03},
+					DepositCount: 0,
+					BlockHash:    make([]byte, 32), // Fix: provide 32-byte hash as slice
+				},
+				Graffiti:          [32]byte{},
+				ProposerSlashings: []*phase0.ProposerSlashing{},
+				AttesterSlashings: []*phase0.AttesterSlashing{},
+				Attestations:      []*phase0.Attestation{},
+				Deposits:          []*phase0.Deposit{},
+				VoluntaryExits:    []*phase0.SignedVoluntaryExit{},
+				SyncAggregate: &altair.SyncAggregate{
+					SyncCommitteeBits:      make([]byte, 64), // 64 bytes for sync committee bits
+					SyncCommitteeSignature: phase0.BLSSignature{},
+				},
+				ExecutionPayload: &deneb.ExecutionPayload{
+					BaseFeePerGas: uint256.NewInt(0), // Initialize to prevent nil pointer dereference
+				},
 				BLSToExecutionChanges: []*capella.SignedBLSToExecutionChange{},
 				BlobKZGCommitments:    []deneb.KZGCommitment{},
 			},
