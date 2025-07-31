@@ -5,8 +5,8 @@ go 1.23.0
 toolchain go1.24.5
 
 require (
-	github.com/attestantio/go-eth2-client v0.0.0
-	github.com/crate-crypto/go-kzg-4844 v0.7.0
+	github.com/attestantio/go-eth2-client v0.26.1-0.20250721122214-dc2928832acc
+	github.com/crate-crypto/go-kzg-4844 v1.1.0
 	github.com/ethereum/go-ethereum v1.13.14
 	github.com/gorilla/mux v1.8.0
 	github.com/holiman/uint256 v1.3.2
@@ -16,24 +16,23 @@ require (
 	github.com/lithammer/dedent v1.1.0
 	github.com/multiformats/go-multiaddr v0.12.2
 	github.com/pkg/errors v0.9.1
-	github.com/protolambda/bls12-381-util v0.0.0-20220416220906-d8552aa452c7
+	github.com/protolambda/bls12-381-util v0.1.0
 	github.com/protolambda/go-keystorev4 v0.1.0
 	github.com/prysmaticlabs/fastssz v0.0.0-20221107182844-78142813af44
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
-	github.com/prysmaticlabs/prysm/v4 v4.2.1
+	github.com/prysmaticlabs/prysm/v4 v4.2.2-rc.0
 	github.com/rs/zerolog v1.34.0
 	github.com/sirupsen/logrus v1.9.3
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.10.0
 )
 
 require (
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.7.0 // indirect
+	github.com/bits-and-blooms/bitset v1.20.0 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.2 // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/consensys/bavard v0.1.13 // indirect
-	github.com/consensys/gnark-crypto v0.12.1 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/consensys/gnark-crypto v0.18.0 // indirect
 	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -47,7 +46,6 @@ require (
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/go-logr/logr v1.3.0 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
@@ -85,7 +83,6 @@ require (
 	github.com/mikioh/tcpopt v0.0.0-20190314235656-172688c1accc // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
-	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
@@ -131,17 +128,14 @@ require (
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 	golang.org/x/tools v0.34.0 // indirect
-	google.golang.org/protobuf v1.32.0 // indirect
+	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/Knetic/govaluate.v3 v3.0.0 // indirect
 	gopkg.in/cenkalti/backoff.v1 v1.1.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
-	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => github.com/lightclient/go-ethereum v1.10.10-0.20231019143932-4d161dee0c4c
+replace github.com/ethereum/go-ethereum => github.com/ethereum/go-ethereum v1.16.2-0.20250722121312-5f2355acf3cf
 
 replace github.com/protolambda/zrnt/eth2/beacon/deneb => ./internal/dummy/deneb
-
-replace github.com/attestantio/go-eth2-client => github.com/attestantio/go-eth2-client v0.26.1-0.20250721122214-dc2928832acc

@@ -29,16 +29,15 @@ import (
 	bitfield "github.com/prysmaticlabs/go-bitfield"
 
 	"github.com/marioevz/blobber/logger"
-	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p/encoder"
 )
 
-var sszNetworkEncoder = encoder.SszNetworkEncoder{}
+var sszNetworkEncoder = SszNetworkEncoder{}
 
 const (
-	StatusProtocolID   = "/eth2/beacon_chain/req/status/1/" + encoder.ProtocolSuffixSSZSnappy
-	GoodbyeProtocolID  = "/eth2/beacon_chain/req/goodbye/1/" + encoder.ProtocolSuffixSSZSnappy
-	PingProtocolID     = "/eth2/beacon_chain/req/ping/1/" + encoder.ProtocolSuffixSSZSnappy
-	MetaDataProtocolID = "/eth2/beacon_chain/req/metadata/2/" + encoder.ProtocolSuffixSSZSnappy
+	StatusProtocolID   = "/eth2/beacon_chain/req/status/1/" + ProtocolSuffixSSZSnappy
+	GoodbyeProtocolID  = "/eth2/beacon_chain/req/goodbye/1/" + ProtocolSuffixSSZSnappy
+	PingProtocolID     = "/eth2/beacon_chain/req/ping/1/" + ProtocolSuffixSSZSnappy
+	MetaDataProtocolID = "/eth2/beacon_chain/req/metadata/2/" + ProtocolSuffixSSZSnappy
 
 	// Connection timeout for direct peer messaging
 	DirectConnectionTimeout = 10 * time.Second

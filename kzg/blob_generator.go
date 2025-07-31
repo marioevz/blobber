@@ -104,12 +104,12 @@ func (blobId BlobID) GenerateBlob() (*gokzg4844.Blob, *gokzg4844.KZGCommitment, 
 	}
 	ctx_4844 := CryptoCtx()
 
-	kzgCommitment, err := ctx_4844.BlobToKZGCommitment(blob, 0)
+	kzgCommitment, err := ctx_4844.BlobToKZGCommitment(&blob, 0)
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "error computing kzg commitment")
 	}
 
-	proof, err := ctx_4844.ComputeBlobKZGProof(blob, kzgCommitment, 1)
+	proof, err := ctx_4844.ComputeBlobKZGProof(&blob, kzgCommitment, 1)
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "error computing kzg proof")
 	}

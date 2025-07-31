@@ -8,10 +8,9 @@ import (
 	"testing"
 
 	"github.com/marioevz/blobber/p2p"
-	"github.com/prysmaticlabs/prysm/v4/beacon-chain/p2p/encoder"
 )
 
-var sszNetworkEncoder = encoder.SszNetworkEncoder{}
+var sszNetworkEncoder = p2p.SszNetworkEncoder{}
 
 func GetFreePort() (port int64, err error) {
 	var a *net.TCPAddr
