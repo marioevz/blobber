@@ -61,8 +61,7 @@ type Blobber struct {
 	includeBlobRecord *common.BlobRecord
 	rejectBlobRecord  *common.BlobRecord
 
-	// Track slots we've already processed to avoid duplicate execution
-	processedSlots sync.Map
+	// Slot deduplication removed - allowing multiple proposal actions per slot
 }
 
 type BuiltBlocksMap struct {
@@ -431,7 +430,15 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 		"parent_block_root": fmt.Sprintf("%#x", denebBlock.Block.ParentRoot),
 		"blob_count":        blResponse.GetBlobsCount(),
 		"action_name":       proposalAction.Name(),
+		"test_peer_count":   testPeerCount,
 	}).Info("Preparing action for block and blobs")
+
+	b.logger.WithFields(map[string]interface{}{
+		"action_name":    proposalAction.Name(),
+		"slot":           blResponse.GetSlot(),
+		"frequency":      proposalAction.Frequency(),
+		"times_executed": proposalAction.TimesExecuted(),
+	}).Debug("About to execute proposal action")
 
 	calcBeaconBlockDomain := b.calcBeaconBlockDomain(blResponse.GetSlot())
 	executed, err := proposalAction.Execute(
@@ -443,12 +450,37 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 		b.includeBlobRecord,
 		b.rejectBlobRecord,
 	)
+
 	if executed && err == nil {
+		b.logger.WithFields(map[string]interface{}{
+			"action_name": proposalAction.Name(),
+			"slot":        blResponse.GetSlot(),
+			"block_root":  fmt.Sprintf("%#x", blockRoot),
+		}).Info("Proposal action executed successfully")
+
 		b.builtBlocksMap.Lock()
 		b.builtBlocksMap.BlockRoots[blResponse.GetSlot()] = blockRoot
 		b.builtBlocksMap.Unlock()
 		b.ProposalAction.IncrementTimesExecuted()
+
+		b.logger.WithFields(map[string]interface{}{
+			"times_executed": b.ProposalAction.TimesExecuted(),
+			"max_executions": b.ProposalAction.MaxExecutionTimes(),
+		}).Debug("Updated proposal action execution count")
+	} else if err != nil {
+		b.logger.WithFields(map[string]interface{}{
+			"action_name": proposalAction.Name(),
+			"slot":        blResponse.GetSlot(),
+			"error":       err,
+			"executed":    executed,
+		}).Error("Proposal action execution failed")
+	} else {
+		b.logger.WithFields(map[string]interface{}{
+			"action_name": proposalAction.Name(),
+			"slot":        blResponse.GetSlot(),
+		}).Debug("Proposal action completed but was not executed")
 	}
+
 	return executed, errors.Wrap(err, "failed to execute proposal action")
 }
 
@@ -512,21 +544,6 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon.BeaconClientAdapter, id in
 		}
 
 		// Check if we've already processed this slot to avoid duplicate execution
-		// This can happen when validators are configured with multiple beacon endpoints
-		slotKey := fmt.Sprintf("%d", slot)
-		if _, exists := b.processedSlots.LoadOrStore(slotKey, true); exists {
-			b.logger.WithFields(map[string]interface{}{
-				"slot":     slot,
-				"proxy_id": id,
-			}).Info("Slot already processed by another proxy, skipping proposal actions")
-			return false, nil
-		}
-
-		// Clean up old slots (keep only last 32 slots)
-		if slotUint > 32 {
-			oldSlotKey := fmt.Sprintf("%d", slotUint-32)
-			b.processedSlots.Delete(oldSlotKey)
-		}
 
 		// Execute the proposal actions
 		if validatorKey == nil {
@@ -534,6 +551,13 @@ func (b *Blobber) genValidatorBlockHandler(cl *beacon.BeaconClientAdapter, id in
 			// Let the block proceed without modification
 			return false, nil
 		}
+
+		b.logger.WithFields(map[string]interface{}{
+			"slot":                  slot,
+			"proposer_index":        blockBlobResponse.GetProposerIndex(),
+			"validator_key_present": validatorKey != nil,
+		}).Debug("Starting proposal action execution")
+
 		override, err := b.executeProposalActions(cl, blockBlobResponse, validatorKey)
 		if err != nil {
 			b.logger.WithFields(map[string]interface{}{
@@ -569,32 +593,57 @@ func ParseResponse(response []byte) (*common.VersionedBlockContents, error) {
 	version := *blockDataStruct.Version
 	decoder := json.NewDecoder(bytes.NewReader(*blockDataStruct.Data))
 
+	// Log version detection
+	logger.New().WithFields(map[string]interface{}{
+		"version":       version,
+		"response_size": len(response),
+	}).Debug("Parsing block response")
+
 	switch version {
 	case common.VersionDeneb:
+		logger.New().WithField("version", "deneb").Debug("Processing Deneb fork block")
 		data := new(apiv1deneb.BlockContents)
 		if err := decoder.Decode(&data); err != nil {
+			logger.New().WithField("error", err).WithField("version", "deneb").Error("Failed to parse Deneb block")
 			return nil, errors.Wrap(err, "failed to decode deneb block contents")
 		}
+		logger.New().WithFields(map[string]interface{}{
+			"version":    "deneb",
+			"blob_count": len(data.Blobs),
+		}).Debug("Successfully parsed Deneb block contents")
 		return &common.VersionedBlockContents{
 			Version: version,
 			Deneb:   data,
 		}, nil
 
 	case common.VersionElectra:
+		logger.New().WithField("version", "electra").Debug("Processing Electra fork block")
 		data := new(apiv1electra.BlockContents)
 		if err := decoder.Decode(&data); err != nil {
+			logger.New().WithField("error", err).WithField("version", "electra").Error("Failed to parse Electra block")
 			return nil, errors.Wrap(err, "failed to decode electra block contents")
 		}
+		logger.New().WithFields(map[string]interface{}{
+			"version":    "electra",
+			"blob_count": len(data.Blobs),
+		}).Debug("Successfully parsed Electra block contents")
 		return &common.VersionedBlockContents{
 			Version: version,
 			Electra: data,
 		}, nil
 
 	case common.VersionFulu:
+		logger.New().WithField("version", "fulu").Info("Processing Fulu fork block - treating as Electra format")
 		data := new(apiv1electra.BlockContents)
 		if err := decoder.Decode(&data); err != nil {
+			logger.New().WithField("error", err).WithField("version", "fulu").Error("Failed to parse Fulu block")
 			return nil, errors.Wrap(err, "failed to decode fulu block contents")
 		}
+		logger.New().WithFields(map[string]interface{}{
+			"version":    "fulu",
+			"blob_count": len(data.Blobs),
+			"note":       "Using Electra format for Fulu blocks",
+		}).Info("Successfully parsed Fulu block contents")
 		return &common.VersionedBlockContents{
 			Version: version,
 			Fulu:    data,

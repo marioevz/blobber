@@ -140,6 +140,11 @@ func (a *BeaconClientAdapter) BlockV2(ctx context.Context, blockId BlockId) (*Ve
 	// Convert blockId to string
 	blockIDStr := string(blockId)
 
+	logrus.WithFields(logrus.Fields{
+		"block_id": blockIDStr,
+		"address":  a.address,
+	}).Debug("Fetching block data from beacon node")
+
 	// Get the eth2client
 	eth2Client := a.client.GetClient()
 
@@ -155,12 +160,19 @@ func (a *BeaconClientAdapter) BlockV2(ctx context.Context, blockId BlockId) (*Ve
 
 	response, err := signedBeaconBlockProvider.SignedBeaconBlock(ctx, opts)
 	if err != nil {
+		logrus.WithError(err).WithField("block_id", blockIDStr).Error("Failed to get signed beacon block")
 		return nil, fmt.Errorf("failed to get signed beacon block: %w", err)
 	}
 
 	if response == nil || response.Data == nil {
+		logrus.WithField("block_id", blockIDStr).Error("No block data returned from beacon node")
 		return nil, fmt.Errorf("no block data returned")
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"block_id": blockIDStr,
+		"version":  response.Data.Version,
+	}).Debug("Received block data from beacon node")
 
 	// Convert go-eth2-client response to our format
 	result := &VersionedSignedBeaconBlock{}
@@ -168,45 +180,74 @@ func (a *BeaconClientAdapter) BlockV2(ctx context.Context, blockId BlockId) (*Ve
 	switch response.Data.Version {
 	case spec.DataVersionPhase0:
 		if response.Data.Phase0 != nil {
+			logrus.WithField("slot", response.Data.Phase0.Message.Slot).Debug("Processing Phase0 block")
 			result.Version = BlockVersionPhase0
 			result.Phase0 = response.Data.Phase0
 		}
 	case spec.DataVersionAltair:
 		if response.Data.Altair != nil {
+			logrus.Debug("Altair block detected but not yet supported")
 			result.Version = BlockVersionAltair
 			// Would need to convert Altair block to our format
 			return nil, fmt.Errorf("altair blocks not yet supported in adapter")
 		}
 	case spec.DataVersionBellatrix:
 		if response.Data.Bellatrix != nil {
+			logrus.Debug("Bellatrix block detected but not yet supported")
 			result.Version = BlockVersionBellatrix
 			// Would need to convert Bellatrix block to our format
 			return nil, fmt.Errorf("bellatrix blocks not yet supported in adapter")
 		}
 	case spec.DataVersionCapella:
 		if response.Data.Capella != nil {
+			logrus.Debug("Capella block detected but not yet supported")
 			result.Version = BlockVersionCapella
 			// Would need to convert Capella block to our format
 			return nil, fmt.Errorf("capella blocks not yet supported in adapter")
 		}
 	case spec.DataVersionDeneb:
 		if response.Data.Deneb != nil {
+			logrus.WithFields(logrus.Fields{
+				"slot":             response.Data.Deneb.Message.Slot,
+				"proposer_index":   response.Data.Deneb.Message.ProposerIndex,
+				"blob_commitments": len(response.Data.Deneb.Message.Body.BlobKZGCommitments),
+			}).Info("Processing Deneb block")
 			result.Version = BlockVersionDeneb
 			result.Deneb = response.Data.Deneb
 		}
 	case spec.DataVersionElectra:
 		if response.Data.Electra != nil {
+			logrus.WithFields(logrus.Fields{
+				"slot":             response.Data.Electra.Message.Slot,
+				"proposer_index":   response.Data.Electra.Message.ProposerIndex,
+				"blob_commitments": len(response.Data.Electra.Message.Body.BlobKZGCommitments),
+			}).Info("Processing Electra block")
 			result.Version = BlockVersionElectra
 			result.Electra = response.Data.Electra
 		}
 	case spec.DataVersionFulu:
 		if response.Data.Fulu != nil {
+			logrus.WithFields(logrus.Fields{
+				"slot":             response.Data.Fulu.Message.Slot,
+				"proposer_index":   response.Data.Fulu.Message.ProposerIndex,
+				"blob_commitments": len(response.Data.Fulu.Message.Body.BlobKZGCommitments),
+			}).Info("Processing Fulu block with native support")
 			result.Version = BlockVersionFulu
 			result.Fulu = response.Data.Fulu
 		}
 	default:
+		logrus.WithFields(logrus.Fields{
+			"version":  response.Data.Version,
+			"block_id": blockIDStr,
+		}).Error("Unknown block version received from beacon node")
 		return nil, fmt.Errorf("unknown block version: %v", response.Data.Version)
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"block_id":      blockIDStr,
+		"final_version": result.Version,
+		"slot":          result.Slot(),
+	}).Debug("Successfully processed block")
 
 	return result, nil
 }

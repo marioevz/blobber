@@ -10,7 +10,6 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 
 	"github.com/pkg/errors"
-	ecdsaprysm "github.com/prysmaticlabs/prysm/v4/crypto/ecdsa"
 )
 
 type ENR interface {
@@ -53,7 +52,7 @@ func (bcp *BeaconClientPeer) GetPeerAddrInfo(ctx context.Context) (*peer.AddrInf
 	}
 
 	pubKey := node.Pubkey()
-	assertedKey, err := ecdsaprysm.ConvertToInterfacePubkey(pubKey)
+	assertedKey, err := ConvertToInterfacePubkey(pubKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not get pubkey")
 	}
