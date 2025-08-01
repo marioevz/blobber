@@ -376,16 +376,27 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 	// Try to create P2P peers if needed
 	var testPeers p2p.TestPeers
 	if testPeerCount > 0 {
+		// Create one peer per beacon node for better connection success
+		actualPeerCount := testPeerCount
+		if len(b.cls) > testPeerCount {
+			actualPeerCount = len(b.cls)
+			b.logger.WithFields(map[string]interface{}{
+				"requested_peers": testPeerCount,
+				"beacon_nodes":    len(b.cls),
+				"actual_peers":    actualPeerCount,
+			}).Info("Creating one P2P peer per beacon node for better connectivity")
+		}
+
 		// Peer with the beacon nodes and broadcast the block and blobs
 		var err error
-		testPeers, err = b.GetTestPeer(b.ctx, testPeerCount)
+		testPeers, err = b.GetTestPeer(b.ctx, actualPeerCount)
 		if err != nil {
 			b.logger.WithField("error", err).Warn("Failed to create P2P test peers, continuing without P2P support")
 			// Create empty test peers array to continue
 			testPeers = make(p2p.TestPeers, 0)
-		} else if len(testPeers) != testPeerCount {
+		} else if len(testPeers) != actualPeerCount {
 			b.logger.WithFields(map[string]interface{}{
-				"expected": testPeerCount,
+				"expected": actualPeerCount,
 				"got":      len(testPeers),
 			}).Warn("Did not get expected number of test peers")
 		} else {
@@ -396,22 +407,54 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 				}).Debug("Created test p2p")
 			}
 
-			// Connect to the beacon nodes
+			// Connect to the beacon nodes with retry logic
+			const maxRetries = 3
+			const retryDelay = 2 * time.Second
 			connectedCount := 0
+
 			for i, cl := range b.cls {
 				testPeer := testPeers[i%len(testPeers)]
-				// Always try to connect/reconnect to ensure fresh connection
-				if err := testPeer.Connect(b.ctx, cl); err != nil {
-					// Log the error but continue with other connections
+				connected := false
+
+				// Retry connection up to maxRetries times
+				for retry := 0; retry < maxRetries && !connected; retry++ {
+					if retry > 0 {
+						b.logger.WithFields(map[string]interface{}{
+							"beacon_index": i,
+							"retry":        retry,
+							"max_retries":  maxRetries,
+						}).Info("Retrying P2P connection to beacon node")
+						time.Sleep(retryDelay)
+					}
+
+					// Always try to connect/reconnect to ensure fresh connection
+					if err := testPeer.Connect(b.ctx, cl); err != nil {
+						// Log the error but continue with retries
+						b.logger.WithFields(map[string]interface{}{
+							"error":           err,
+							"beacon_index":    i,
+							"test_peer_index": i % len(testPeers),
+							"retry":           retry,
+						}).Warn("Failed to connect to beacon node via P2P")
+					} else {
+						connected = true
+						connectedCount++
+						b.logger.WithFields(map[string]interface{}{
+							"beacon_index":    i,
+							"test_peer_index": i % len(testPeers),
+							"peer_id":         testPeer.Host.ID().String(),
+						}).Info("Successfully connected to beacon node via P2P")
+					}
+				}
+
+				if !connected {
 					b.logger.WithFields(map[string]interface{}{
-						"error":           err,
-						"beacon_index":    i,
-						"test_peer_index": i % len(testPeers),
-					}).Warn("Failed to connect to beacon node via P2P")
-				} else {
-					connectedCount++
+						"beacon_index": i,
+						"max_retries":  maxRetries,
+					}).Error("Failed to connect to beacon node after all retries")
 				}
 			}
+
 			b.logger.WithFields(map[string]interface{}{
 				"connected":     connectedCount,
 				"total_beacons": len(b.cls),
