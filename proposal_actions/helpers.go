@@ -235,7 +235,9 @@ func MultiPeerBlobBroadcast(spec map[string]interface{}, peers p2p.TestPeers, bl
 	broadcastBlobs := func(testPeer *p2p.TestPeer, blobs []*deneb.BlobSidecar) {
 		defer wg.Done()
 		for i, blob := range blobs {
-			if err := testPeer.BroadcastBlobSidecar(context.Background(), spec, blob, nil); err != nil {
+			// Disconnect after the last blob
+			disconnectAfter := (i == len(blobs)-1)
+			if err := testPeer.BroadcastBlobSidecarWithConfig(context.Background(), spec, blob, nil, disconnectAfter); err != nil {
 				errs <- errors.Wrapf(err, "failed to broadcast signed blob %d", i)
 				return
 			}
@@ -284,17 +286,19 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 		time.Sleep(time.Duration(b.DelayMilliseconds) * time.Millisecond)
 	}
 
-	broadcastBlobs := func(testPeer *p2p.TestPeer, blobs []*deneb.BlobSidecar) error {
+	broadcastBlobs := func(testPeer *p2p.TestPeer, blobs []*deneb.BlobSidecar, isLast bool) error {
 		for i, blob := range blobs {
-			if err := testPeer.BroadcastBlobSidecar(context.Background(), b.Spec, blob, nil); err != nil {
+			// Only disconnect after the last blob if this is the last broadcast
+			disconnectAfter := isLast && (i == len(blobs)-1)
+			if err := testPeer.BroadcastBlobSidecarWithConfig(context.Background(), b.Spec, blob, nil, disconnectAfter); err != nil {
 				return errors.Wrapf(err, "failed to broadcast signed blob %d", i)
 			}
 		}
 		return nil
 	}
 
-	broadcastBlock := func(testPeer *p2p.TestPeer, signedBlock *deneb.SignedBeaconBlock) error {
-		if err := testPeer.BroadcastSignedBeaconBlock(context.Background(), b.Spec, signedBlock); err != nil {
+	broadcastBlock := func(testPeer *p2p.TestPeer, signedBlock *deneb.SignedBeaconBlock, shouldDisconnect bool) error {
+		if err := testPeer.BroadcastSignedBeaconBlockWithConfig(context.Background(), b.Spec, signedBlock, shouldDisconnect); err != nil {
 			return errors.Wrap(err, "failed to broadcast signed block")
 		}
 		return nil
@@ -306,20 +310,24 @@ func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) erro
 	broadcastBundle := func(testPeer *p2p.TestPeer, bundle *SignedBlockSidecarsBundle) {
 		defer wg.Done()
 		if b.BlobsFirst {
-			if err := broadcastBlobs(testPeer, bundle.BlobSidecars); err != nil {
+			// Don't disconnect after blobs since we need to broadcast block next
+			if err := broadcastBlobs(testPeer, bundle.BlobSidecars, false); err != nil {
 				errs <- err
 				return
 			}
-			if err := broadcastBlock(testPeer, bundle.SignedBlock); err != nil {
+			// Disconnect after block since it's the last broadcast
+			if err := broadcastBlock(testPeer, bundle.SignedBlock, true); err != nil {
 				errs <- err
 				return
 			}
 		} else {
-			if err := broadcastBlock(testPeer, bundle.SignedBlock); err != nil {
+			// Don't disconnect after block since we need to broadcast blobs next
+			if err := broadcastBlock(testPeer, bundle.SignedBlock, false); err != nil {
 				errs <- err
 				return
 			}
-			if err := broadcastBlobs(testPeer, bundle.BlobSidecars); err != nil {
+			// Disconnect after blobs since it's the last broadcast
+			if err := broadcastBlobs(testPeer, bundle.BlobSidecars, true); err != nil {
 				errs <- err
 				return
 			}
