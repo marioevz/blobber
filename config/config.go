@@ -34,6 +34,10 @@ type Config struct {
 	ValidatorLoadTimeoutSeconds int
 
 	ProposalAction proposal_actions.ProposalAction
+
+	// P2P configuration
+	StaticPeers []string
+	Bootnodes   []string
 }
 
 func (cfg *Config) Apply(opts ...Option) error {
@@ -317,5 +321,29 @@ func WithAlwaysErrorValidatorResponse() Option {
 			return nil
 		},
 		Description: "WithAlwaysErrorValidatorResponse()",
+	}
+}
+
+func WithStaticPeers(peers []string) Option {
+	return Option{
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.StaticPeers = peers
+			return nil
+		},
+		Description: fmt.Sprintf("WithStaticPeers(%d peers)", len(peers)),
+	}
+}
+
+func WithBootnodes(bootnodes []string) Option {
+	return Option{
+		apply: func(cfg *Config) error {
+			cfg.Lock()
+			defer cfg.Unlock()
+			cfg.Bootnodes = bootnodes
+			return nil
+		},
+		Description: fmt.Sprintf("WithBootnodes(%d nodes)", len(bootnodes)),
 	}
 }
