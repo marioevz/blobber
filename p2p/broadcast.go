@@ -141,7 +141,8 @@ func EncodeDirectMessage(msg interface{}) ([]byte, error) {
 	return nil, errors.New("message does not implement SSZ marshaling")
 }
 
-func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[string]interface{}, signedBeaconBlock *deneb.SignedBeaconBlock) error {
+// BroadcastSignedBeaconBlockWithConfig broadcasts a signed beacon block with configuration options
+func (p *TestPeer) BroadcastSignedBeaconBlockWithConfig(ctx context.Context, spec map[string]interface{}, signedBeaconBlock *deneb.SignedBeaconBlock, disconnectAfter bool) error {
 	start := time.Now()
 
 	// Get connected peers for direct messaging
@@ -218,13 +219,15 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[stri
 			}
 		}
 
-		// Send graceful goodbye and disconnect
-		if err := p.SendGoodbyeAndDisconnect(ctx, peerID, 1); err != nil {
-			if p.logger != nil {
-				p.logger.WithFields(map[string]interface{}{
-					"peer_id": peerID.String(),
-					"error":   err.Error(),
-				}).Warn("Failed to send goodbye and disconnect")
+		// Send graceful goodbye and disconnect if requested
+		if disconnectAfter {
+			if err := p.SendGoodbyeAndDisconnect(ctx, peerID, 1); err != nil {
+				if p.logger != nil {
+					p.logger.WithFields(map[string]interface{}{
+						"peer_id": peerID.String(),
+						"error":   err.Error(),
+					}).Warn("Failed to send goodbye and disconnect")
+				}
 			}
 		}
 	}
@@ -248,6 +251,11 @@ func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[stri
 	return nil
 }
 
+// BroadcastSignedBeaconBlock broadcasts with default behavior (disconnect after)
+func (p *TestPeer) BroadcastSignedBeaconBlock(ctx context.Context, spec map[string]interface{}, signedBeaconBlock *deneb.SignedBeaconBlock) error {
+	return p.BroadcastSignedBeaconBlockWithConfig(ctx, spec, signedBeaconBlock, true)
+}
+
 func (p TestPeers) BroadcastSignedBeaconBlock(ctx context.Context, spec map[string]interface{}, signedBeaconBlockDeneb *deneb.SignedBeaconBlock) error {
 	for _, p2p := range p {
 		if err := p2p.BroadcastSignedBeaconBlock(ctx, spec, signedBeaconBlockDeneb); err != nil {
@@ -257,7 +265,8 @@ func (p TestPeers) BroadcastSignedBeaconBlock(ctx context.Context, spec map[stri
 	return nil
 }
 
-func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
+// BroadcastBlobSidecarWithConfig broadcasts a blob sidecar with configuration options
+func (p *TestPeer) BroadcastBlobSidecarWithConfig(ctx context.Context, spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64, disconnectAfter bool) error {
 	start := time.Now()
 	if subnet == nil {
 		// By default broadcast to the blob subnet of the index of the sidecar
@@ -349,13 +358,15 @@ func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]int
 			}
 		}
 
-		// Send graceful goodbye and disconnect
-		if err := p.SendGoodbyeAndDisconnect(ctx, peerID, 1); err != nil {
-			if p.logger != nil {
-				p.logger.WithFields(map[string]interface{}{
-					"peer_id": peerID.String(),
-					"error":   err.Error(),
-				}).Warn("Failed to send goodbye and disconnect")
+		// Send graceful goodbye and disconnect if requested
+		if disconnectAfter {
+			if err := p.SendGoodbyeAndDisconnect(ctx, peerID, 1); err != nil {
+				if p.logger != nil {
+					p.logger.WithFields(map[string]interface{}{
+						"peer_id": peerID.String(),
+						"error":   err.Error(),
+					}).Warn("Failed to send goodbye and disconnect")
+				}
 			}
 		}
 	}
@@ -379,6 +390,11 @@ func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]int
 	}
 
 	return nil
+}
+
+// BroadcastBlobSidecar broadcasts with default behavior (disconnect after)
+func (p *TestPeer) BroadcastBlobSidecar(ctx context.Context, spec map[string]interface{}, blobSidecar *deneb.BlobSidecar, subnet *uint64) error {
+	return p.BroadcastBlobSidecarWithConfig(ctx, spec, blobSidecar, subnet, true)
 }
 
 func (p *TestPeer) BroadcastBlobSidecars(ctx context.Context, spec map[string]interface{}, blobSidecars ...*deneb.BlobSidecar) error {
