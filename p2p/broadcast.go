@@ -17,7 +17,8 @@ const (
 	BlobSidecarProtocolID = "/eth2/beacon_chain/req/blob_sidecars_by_range/1/" + "ssz_snappy"
 
 	// Message send timeout for direct peer messaging
-	MessageSendTimeout = 5 * time.Second
+	// Increased to 30 seconds to handle large blob transmissions (20 blobs * ~132KB each)
+	MessageSendTimeout = 30 * time.Second
 )
 
 // SendDirectMessage sends a message directly to a peer using req/resp protocol
@@ -145,13 +146,13 @@ func EncodeDirectMessage(msg interface{}) ([]byte, error) {
 func (p *TestPeer) BroadcastSignedBeaconBlockWithConfig(ctx context.Context, spec map[string]interface{}, signedBeaconBlock *deneb.SignedBeaconBlock, disconnectAfter bool) error {
 	start := time.Now()
 
-	// Get connected peers for direct messaging
-	connectedPeers := p.Host.Network().Peers()
+	// Get connected beacon node peers for direct messaging
+	connectedPeers := p.GetConnectedBeaconPeers()
 	if len(connectedPeers) == 0 {
 		if p.logger != nil {
-			p.logger.WithField("slot", signedBeaconBlock.Message.Slot).Warn("No connected peers for beacon block broadcast")
+			p.logger.WithField("slot", signedBeaconBlock.Message.Slot).Warn("No connected beacon node peers for beacon block broadcast")
 		}
-		return errors.New("no connected peers available for broadcast")
+		return errors.New("no connected beacon node peers available for broadcast")
 	}
 
 	if p.logger != nil {
@@ -278,17 +279,17 @@ func (p *TestPeer) BroadcastBlobSidecarWithConfig(ctx context.Context, spec map[
 		subnet = &index
 	}
 
-	// Get connected peers for direct messaging
-	connectedPeers := p.Host.Network().Peers()
+	// Get connected beacon node peers for direct messaging
+	connectedPeers := p.GetConnectedBeaconPeers()
 	if len(connectedPeers) == 0 {
 		if p.logger != nil {
 			p.logger.WithFields(map[string]interface{}{
 				"index":  blobSidecar.Index,
 				"subnet": *subnet,
 				"slot":   blobSidecar.SignedBlockHeader.Message.Slot,
-			}).Warn("No connected peers for blob sidecar broadcast")
+			}).Warn("No connected beacon node peers for blob sidecar broadcast")
 		}
-		return errors.New("no connected peers available for broadcast")
+		return errors.New("no connected beacon node peers available for broadcast")
 	}
 
 	if p.logger != nil {
