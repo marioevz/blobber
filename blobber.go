@@ -15,6 +15,8 @@ import (
 	apiv1deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
 	apiv1electra "github.com/attestantio/go-eth2-client/api/v1/electra"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/pkg/errors"
 
 	"github.com/marioevz/blobber/beacon"
@@ -141,6 +143,9 @@ func NewBlobber(ctx context.Context, log logger.Logger, opts ...config.Option) (
 	if b.TestP2P != nil {
 		b.SetLogger(log)
 	}
+
+	// Connect to beacon clients via P2P (automatically discovers and connects)
+	go b.connectToStaticPeers(ctx)
 
 	return b, nil
 }
@@ -362,16 +367,27 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 	// Try to create P2P peers if needed
 	var testPeers p2p.TestPeers
 	if testPeerCount > 0 {
+		// Create one peer per beacon node for better connection success
+		actualPeerCount := testPeerCount
+		if len(b.cls) > testPeerCount {
+			actualPeerCount = len(b.cls)
+			b.logger.WithFields(map[string]interface{}{
+				"requested_peers": testPeerCount,
+				"beacon_nodes":    len(b.cls),
+				"actual_peers":    actualPeerCount,
+			}).Info("Creating one P2P peer per beacon node for better connectivity")
+		}
+
 		// Peer with the beacon nodes and broadcast the block and blobs
 		var err error
-		testPeers, err = b.GetTestPeer(b.ctx, testPeerCount)
+		testPeers, err = b.GetTestPeer(b.ctx, actualPeerCount)
 		if err != nil {
 			b.logger.WithField("error", err).Warn("Failed to create P2P test peers, continuing without P2P support")
 			// Create empty test peers array to continue
 			testPeers = make(p2p.TestPeers, 0)
-		} else if len(testPeers) != testPeerCount {
+		} else if len(testPeers) != actualPeerCount {
 			b.logger.WithFields(map[string]interface{}{
-				"expected": testPeerCount,
+				"expected": actualPeerCount,
 				"got":      len(testPeers),
 			}).Warn("Did not get expected number of test peers")
 		} else {
@@ -382,22 +398,54 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 				}).Debug("Created test p2p")
 			}
 
-			// Connect to the beacon nodes
+			// Connect to the beacon nodes with retry logic
+			const maxRetries = 3
+			const retryDelay = 2 * time.Second
 			connectedCount := 0
+
 			for i, cl := range b.cls {
 				testPeer := testPeers[i%len(testPeers)]
-				// Always try to connect/reconnect to ensure fresh connection
-				if err := testPeer.Connect(b.ctx, cl); err != nil {
-					// Log the error but continue with other connections
+				connected := false
+
+				// Retry connection up to maxRetries times
+				for retry := 0; retry < maxRetries && !connected; retry++ {
+					if retry > 0 {
+						b.logger.WithFields(map[string]interface{}{
+							"beacon_index": i,
+							"retry":        retry,
+							"max_retries":  maxRetries,
+						}).Info("Retrying P2P connection to beacon node")
+						time.Sleep(retryDelay)
+					}
+
+					// Always try to connect/reconnect to ensure fresh connection
+					if err := testPeer.Connect(b.ctx, cl); err != nil {
+						// Log the error but continue with retries
+						b.logger.WithFields(map[string]interface{}{
+							"error":           err,
+							"beacon_index":    i,
+							"test_peer_index": i % len(testPeers),
+							"retry":           retry,
+						}).Warn("Failed to connect to beacon node via P2P")
+					} else {
+						connected = true
+						connectedCount++
+						b.logger.WithFields(map[string]interface{}{
+							"beacon_index":    i,
+							"test_peer_index": i % len(testPeers),
+							"peer_id":         testPeer.Host.ID().String(),
+						}).Info("Successfully connected to beacon node via P2P")
+					}
+				}
+
+				if !connected {
 					b.logger.WithFields(map[string]interface{}{
-						"error":           err,
-						"beacon_index":    i,
-						"test_peer_index": i % len(testPeers),
-					}).Warn("Failed to connect to beacon node via P2P")
-				} else {
-					connectedCount++
+						"beacon_index": i,
+						"max_retries":  maxRetries,
+					}).Error("Failed to connect to beacon node after all retries")
 				}
 			}
+
 			b.logger.WithFields(map[string]interface{}{
 				"connected":     connectedCount,
 				"total_beacons": len(b.cls),
@@ -636,5 +684,158 @@ func ParseResponse(response []byte) (*common.VersionedBlockContents, error) {
 	default:
 		// Log unsupported version if needed (caller can log this)
 		return &common.VersionedBlockContents{Version: version}, nil
+	}
+}
+
+// connectToStaticPeers connects to configured static peers
+func (b *Blobber) connectToStaticPeers(ctx context.Context) {
+	// Fetch node identities from beacon clients and connect
+	b.logger.Info("Fetching node identities from beacon clients")
+
+	// Get test peers for P2P connections
+	testPeerCount := 1 // Start with one peer for static connections
+	testPeers, err := b.GetTestPeer(ctx, testPeerCount)
+	if err != nil {
+		b.logger.WithFields(map[string]interface{}{
+			"error": err,
+		}).Error("Failed to create test peer for static connections")
+		return
+	}
+
+	testPeer := testPeers[0]
+
+	// Fetch and connect to each beacon client's P2P endpoint
+	staticPeers := make([]string, 0)
+	for i, cl := range b.cls {
+		b.logger.WithFields(map[string]interface{}{
+			"beacon_index": i,
+		}).Debug("Getting peer address info from beacon client")
+
+		// Get peer address info using the existing GetPeerAddrInfo method
+		peerAddrInfo, err := cl.GetPeerAddrInfo(ctx)
+		if err != nil {
+			b.logger.WithFields(map[string]interface{}{
+				"beacon_index": i,
+				"error":        err,
+			}).Warn("Failed to get peer address info")
+			continue
+		}
+
+		// Connect to the peer
+		if err := testPeer.Connect(ctx, cl); err != nil {
+			b.logger.WithFields(map[string]interface{}{
+				"beacon_index": i,
+				"peer_id":      peerAddrInfo.ID.String(),
+				"error":        err,
+			}).Warn("Failed to connect to beacon node")
+			continue
+		}
+
+		b.logger.WithFields(map[string]interface{}{
+			"beacon_index": i,
+			"peer_id":      peerAddrInfo.ID.String(),
+		}).Info("Successfully connected to beacon node P2P endpoint")
+
+		// Build multiaddr string for tracking
+		if len(peerAddrInfo.Addrs) > 0 {
+			p2pAddr := fmt.Sprintf("%s/p2p/%s", peerAddrInfo.Addrs[0].String(), peerAddrInfo.ID.String())
+			staticPeers = append(staticPeers, p2pAddr)
+		}
+	}
+
+	// Also connect to any manually configured static peers
+	for _, peerAddr := range b.StaticPeers {
+		b.logger.WithFields(map[string]interface{}{
+			"peer_addr": peerAddr,
+		}).Info("Attempting to connect to manually configured static peer")
+
+		peerID, err := testPeer.ConnectToPeerTemporarily(ctx, peerAddr)
+		if err != nil {
+			b.logger.WithFields(map[string]interface{}{
+				"peer_addr": peerAddr,
+				"error":     err,
+			}).Warn("Failed to connect to static peer")
+			continue
+		}
+
+		b.logger.WithFields(map[string]interface{}{
+			"peer_addr": peerAddr,
+			"peer_id":   peerID.String(),
+		}).Info("Successfully connected to static peer")
+
+		staticPeers = append(staticPeers, peerAddr)
+	}
+
+	// Update the static peers list with discovered peers
+	b.StaticPeers = staticPeers
+
+	b.logger.WithFields(map[string]interface{}{
+		"total_static_peers": len(staticPeers),
+	}).Info("Completed static peer connections")
+
+	// Keep connections alive
+	if len(staticPeers) > 0 {
+		go b.maintainStaticPeerConnections(ctx, testPeer)
+	}
+}
+
+// maintainStaticPeerConnections periodically checks and reconnects to static peers
+func (b *Blobber) maintainStaticPeerConnections(ctx context.Context, testPeer *p2p.TestPeer) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Check each static peer connection
+			for _, peerAddr := range b.StaticPeers {
+				// Extract peer ID from multiaddr
+				// Format: /ip4/1.2.3.4/tcp/9000/p2p/16Uiu2...
+				parts := strings.Split(peerAddr, "/")
+				var peerIDStr string
+				for i, part := range parts {
+					if part == "p2p" && i+1 < len(parts) {
+						peerIDStr = parts[i+1]
+						break
+					}
+				}
+
+				if peerIDStr == "" {
+					continue
+				}
+
+				// Check if still connected
+				peerID, err := peer.Decode(peerIDStr)
+				if err != nil {
+					b.logger.WithFields(map[string]interface{}{
+						"peer_addr": peerAddr,
+						"error":     err,
+					}).Warn("Failed to decode peer ID")
+					continue
+				}
+
+				if testPeer.Host.Network().Connectedness(peerID) != network.Connected {
+					b.logger.WithFields(map[string]interface{}{
+						"peer_addr": peerAddr,
+						"peer_id":   peerIDStr,
+					}).Info("Reconnecting to disconnected static peer")
+
+					// Attempt to reconnect
+					_, err := testPeer.ConnectToPeerTemporarily(ctx, peerAddr)
+					if err != nil {
+						b.logger.WithFields(map[string]interface{}{
+							"peer_addr": peerAddr,
+							"error":     err,
+						}).Warn("Failed to reconnect to static peer")
+					} else {
+						b.logger.WithFields(map[string]interface{}{
+							"peer_addr": peerAddr,
+						}).Info("Successfully reconnected to static peer")
+					}
+				}
+			}
+		}
 	}
 }

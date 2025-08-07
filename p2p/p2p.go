@@ -131,7 +131,11 @@ type TestPeer struct {
 	// Topic management
 	topicHandles       map[string]*pubsub.Topic
 	topicSubscriptions map[string]*pubsub.Subscription
-	topicMutex         sync.RWMutex
+
+	// Connected beacon nodes tracking
+	connectedBeaconNodes map[peer.ID]string // peer ID -> beacon node name
+	connectedMutex       sync.RWMutex
+	topicMutex           sync.RWMutex
 
 	// Logger
 	logger logger.Logger
@@ -310,11 +314,12 @@ func (t *TestP2P) NewTestPeer(ctx context.Context, port int64) (*TestPeer, error
 
 		state: t.ChainStatus,
 
-		ctx:                ctx,
-		cancel:             cancel,
-		topicHandles:       make(map[string]*pubsub.Topic),
-		topicSubscriptions: make(map[string]*pubsub.Subscription),
-		logger:             t.logger,
+		ctx:                  ctx,
+		cancel:               cancel,
+		topicHandles:         make(map[string]*pubsub.Topic),
+		topicSubscriptions:   make(map[string]*pubsub.Subscription),
+		connectedBeaconNodes: make(map[peer.ID]string),
+		logger:               t.logger,
 	}
 	if err := testPeer.SetupStreams(context.Background()); err != nil {
 		_ = testPeer.Close(context.Background())
@@ -345,6 +350,10 @@ func (p *TestPeer) Connect(ctx context.Context, peer *BeaconClientPeer) error {
 					"local": c.LocalPeer().String(),
 				}).Debug("Peer disconnected")
 			}
+			// Remove from tracked connections
+			p.connectedMutex.Lock()
+			delete(p.connectedBeaconNodes, c.RemotePeer())
+			p.connectedMutex.Unlock()
 		},
 	})
 
@@ -364,7 +373,27 @@ func (p *TestPeer) Connect(ctx context.Context, peer *BeaconClientPeer) error {
 		}).Info("Successfully connected to beacon node peer")
 	}
 
+	// Track the connection
+	p.connectedMutex.Lock()
+	p.connectedBeaconNodes[peerAddrInfo.ID] = peerAddrInfo.ID.String()
+	p.connectedMutex.Unlock()
+
 	return nil
+}
+
+// GetConnectedBeaconPeers returns a list of all connected beacon node peer IDs
+func (p *TestPeer) GetConnectedBeaconPeers() []peer.ID {
+	p.connectedMutex.RLock()
+	defer p.connectedMutex.RUnlock()
+
+	peers := make([]peer.ID, 0, len(p.connectedBeaconNodes))
+	for peerID := range p.connectedBeaconNodes {
+		// Double-check the peer is still connected
+		if p.Host.Network().Connectedness(peerID) == network.Connected {
+			peers = append(peers, peerID)
+		}
+	}
+	return peers
 }
 
 func (p *TestPeer) SendInitialStatus(ctx context.Context, peer peer.ID) error {

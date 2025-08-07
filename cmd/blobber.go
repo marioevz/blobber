@@ -153,6 +153,8 @@ func main() {
 		maxDevP2PSessionReuses            int
 		blobberID                         uint64
 		unsafeMode                        bool
+		staticPeers                       arrayFlags
+		bootnodes                         arrayFlags
 	)
 
 	// Set custom usage function
@@ -251,6 +253,16 @@ func main() {
 		"enable-unsafe-mode",
 		false,
 		"Enable unsafe mode, only use this if you know what you're doing and never attempt to run this tool on mainnet.",
+	)
+	flag.Var(
+		&staticPeers,
+		"static-peer",
+		"Static peers to connect to (multiaddr format). Can be specified multiple times.",
+	)
+	flag.Var(
+		&bootnodes,
+		"bootnode",
+		"Bootnode ENRs for peer discovery. Can be specified multiple times.",
 	)
 
 	// Parse flags
@@ -401,6 +413,19 @@ func main() {
 		config.WithMaxDevP2PSessionReuses(maxDevP2PSessionReuses),
 		config.WithLogLevel(logLevel),
 	}
+
+	// Add static peers if provided
+	if len(staticPeers) > 0 {
+		fmt.Printf("Adding %d static peers\n", len(staticPeers))
+		blobberOpts = append(blobberOpts, config.WithStaticPeers(staticPeers))
+	}
+
+	// Add bootnodes if provided
+	if len(bootnodes) > 0 {
+		fmt.Printf("Adding %d bootnodes\n", len(bootnodes))
+		blobberOpts = append(blobberOpts, config.WithBootnodes(bootnodes))
+	}
+
 	fmt.Printf("Created %d base options\n", len(blobberOpts))
 
 	if validatorKeyFilePath != "" && validatorKeyFolderPath != "" {

@@ -276,8 +276,17 @@ type BundleBroadcaster struct {
 }
 
 func (b BundleBroadcaster) Broadcast(bundles ...*SignedBlockSidecarsBundle) error {
-	if len(b.Peers) != len(bundles) {
-		return errors.New("peers and bundles must have the same length")
+	// Handle the common case of broadcasting one bundle to all peers
+	if len(bundles) == 1 && len(b.Peers) > 0 {
+		// Broadcast the same bundle to all peers
+		bundle := bundles[0]
+		expandedBundles := make([]*SignedBlockSidecarsBundle, len(b.Peers))
+		for i := range b.Peers {
+			expandedBundles[i] = bundle
+		}
+		bundles = expandedBundles
+	} else if len(b.Peers) != len(bundles) {
+		return errors.New("peers and bundles must have the same length (or provide single bundle for all peers)")
 	}
 
 	// If there's a delay configured, apply it BEFORE establishing any P2P connections
