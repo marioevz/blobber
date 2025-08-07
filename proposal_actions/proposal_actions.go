@@ -10,7 +10,6 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/lithammer/dedent"
-	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/kzg"
 	"github.com/marioevz/blobber/p2p"
@@ -43,8 +42,6 @@ type ProposalActionBase interface {
 		beaconBlockContents *apiv1deneb.BlockContents,
 		beaconBlockDomain phase0.Domain,
 		validatorKey *keys.ValidatorKey,
-		includeBlobRecord *common.BlobRecord,
-		rejectBlobRecord *common.BlobRecord,
 	) (bool, error)
 }
 
@@ -211,8 +208,6 @@ func (s Default) Execute(
 	beaconBlockContents *apiv1deneb.BlockContents,
 	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	start := time.Now()
 	logrus.WithFields(logrus.Fields{
@@ -257,8 +252,7 @@ func (s Default) Execute(
 	}
 
 	if !s.SlotMiss(spec) {
-		// Add the blobs to the must-include blob record
-		includeBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundle.BlobSidecars...)
+		// Previously tracked blobs for inclusion - removed as unused
 	}
 
 	duration := time.Since(start)
@@ -324,8 +318,6 @@ func (s BlobGossipDelay) Execute(
 	beaconBlockContents *apiv1deneb.BlockContents,
 	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	start := time.Now()
 	logrus.WithFields(logrus.Fields{
@@ -379,8 +371,7 @@ func (s BlobGossipDelay) Execute(
 	}
 
 	if !s.SlotMiss(spec) {
-		// Add the blobs to the must-include blob record
-		includeBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundle.BlobSidecars...)
+		// Previously tracked blobs for inclusion - removed as unused
 	}
 
 	duration := time.Since(start)
@@ -448,8 +439,6 @@ func (s EquivocatingBlobSidecars) Execute(
 	beaconBlockContents *apiv1deneb.BlockContents,
 	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	start := time.Now()
 	logrus.WithFields(logrus.Fields{
@@ -589,8 +578,6 @@ func (s InvalidEquivocatingBlockAndBlobs) Execute(
 	beaconBlockContents *apiv1deneb.BlockContents,
 	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	start := time.Now()
 	logrus.WithFields(logrus.Fields{
@@ -716,8 +703,6 @@ func (s EquivocatingBlockHeaderInBlobs) Execute(
 	beaconBlockContents *apiv1deneb.BlockContents,
 	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	start := time.Now()
 	logrus.WithFields(logrus.Fields{
@@ -774,9 +759,7 @@ func (s EquivocatingBlockHeaderInBlobs) Execute(
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
-	// Add the blobs to the must-reject blob record
-	rejectBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundles[0].BlobSidecars...)
-	rejectBlobRecord.Add(beaconBlockContents.Block.Slot, signedBlockBlobsBundles[1].BlobSidecars...)
+	// Previously tracked blobs for rejection - removed as unused
 
 	logrus.WithFields(logrus.Fields{
 		"action":              s.Name(),
@@ -835,8 +818,6 @@ func (s InvalidEquivocatingBlock) Execute(
 	beaconBlockContents *apiv1deneb.BlockContents,
 	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	start := time.Now()
 	logrus.WithFields(logrus.Fields{
@@ -905,8 +886,7 @@ func (s InvalidEquivocatingBlock) Execute(
 	}
 
 	if !s.SlotMiss(spec) {
-		// Add the blobs to the must-include blob record
-		includeBlobRecord.Add(beaconBlockContents.Block.Slot, correctBlockBundle.BlobSidecars...)
+		// Previously tracked blobs for inclusion - removed as unused
 		logrus.WithFields(logrus.Fields{
 			"action":     s.Name(),
 			"blob_count": len(correctBlockBundle.BlobSidecars),
@@ -987,8 +967,6 @@ func (s ExtraBlobs) Execute(
 	beaconBlockContents *apiv1deneb.BlockContents,
 	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	// Sign block
 	signedBlockContents, err := SignBlockContents(spec, beaconBlockContents, beaconBlockDomain, validatorKey)
@@ -1110,11 +1088,7 @@ func (s ExtraBlobs) Execute(
 		}
 	}
 
-	// Add the blobs to the must-include blob record
-	includeBlobRecord.Add(beaconBlockContents.Block.Slot, blobSidecars...)
-
-	// Add the extra blob to the must-reject blob record
-	rejectBlobRecord.Add(beaconBlockContents.Block.Slot, extraBlobSidecar)
+	// Previously tracked blobs for inclusion and rejection - removed as unused
 
 	return true, nil
 }
@@ -1160,8 +1134,6 @@ func (s ConflictingBlobs) Execute(
 	beaconBlockContents *apiv1deneb.BlockContents,
 	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	if len(testPeers) != 2 {
 		return false, fmt.Errorf("expected 2 test p2p connections, got %d", len(testPeers))
@@ -1211,8 +1183,7 @@ func (s ConflictingBlobs) Execute(
 				return false, errors.Wrap(err, "failed to sign extra blob")
 			}
 
-			// Add the blob to the must-reject blob record
-			rejectBlobRecord.Add(beaconBlockContents.Block.Slot, conflictingBlobSidecar)
+			// Previously tracked blob for rejection - removed as unused
 		} else {
 			secondBlobSidecars[i] = signedBlobs[i]
 		}
@@ -1233,8 +1204,7 @@ func (s ConflictingBlobs) Execute(
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
-	// Add the blobs to the must-include blob record
-	includeBlobRecord.Add(beaconBlockContents.Block.Slot, blobSidecars...)
+	// Previously tracked blobs for inclusion - removed as unused
 
 	return true, nil
 }
@@ -1300,8 +1270,6 @@ func (s SwapBlobs) Execute(
 	beaconBlockContents *apiv1deneb.BlockContents,
 	beaconBlockDomain phase0.Domain,
 	validatorKey *keys.ValidatorKey,
-	includeBlobRecord *common.BlobRecord,
-	rejectBlobRecord *common.BlobRecord,
 ) (bool, error) {
 	var (
 		signedBlock          *eth.SignedBeaconBlockDeneb
@@ -1360,11 +1328,9 @@ func (s SwapBlobs) Execute(
 
 	// Add the blobs to the records
 	if s.SplitNetwork {
-		// The signed blobs with the correct indexes do make their way into the network, so they must be present in the block
-		includeBlobRecord.Add(beaconBlockContents.Block.Slot, blobSidecars...)
+		// Previously tracked blobs for inclusion - removed as unused
 	} else {
-		// Only the modified invalid blob sidecars make their way into the network, so they shouldn't be present in the block
-		rejectBlobRecord.Add(beaconBlockContents.Block.Slot, modifiedBlobSidecars...)
+		// Previously tracked blobs for rejection - removed as unused
 	}
 
 	return true, nil

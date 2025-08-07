@@ -57,9 +57,7 @@ type Blobber struct {
 	// Note: ForkDecoder is not needed with go-eth2-client
 
 	// Records
-	builtBlocksMap    *BuiltBlocksMap
-	includeBlobRecord *common.BlobRecord
-	rejectBlobRecord  *common.BlobRecord
+	builtBlocksMap *BuiltBlocksMap
 
 	// Slot deduplication removed - allowing multiple proposal actions per slot
 }
@@ -98,8 +96,6 @@ func NewBlobber(ctx context.Context, log logger.Logger, opts ...config.Option) (
 		builtBlocksMap: &BuiltBlocksMap{
 			BlockRoots: make(map[phase0.Slot][32]byte),
 		},
-		includeBlobRecord: common.NewBlobRecord(),
-		rejectBlobRecord:  common.NewBlobRecord(),
 	}
 
 	log.Info("Applying configuration options...")
@@ -155,16 +151,6 @@ func (b *Blobber) Address() string {
 		b.ExternalIP,
 		b.Port,
 	)
-}
-
-// Return a list of blobs that each proposal action has classified as must-be-included
-func (b *Blobber) IncludeBlobRecord() *common.BlobRecord {
-	return b.includeBlobRecord
-}
-
-// Return a list of blobs that each proposal action has classified as must-be-rejected
-func (b *Blobber) RejectBlobRecord() *common.BlobRecord {
-	return b.rejectBlobRecord
 }
 
 func (b *Blobber) Close(ctx context.Context) error {
@@ -447,8 +433,6 @@ func (b *Blobber) executeProposalActions(trigger_cl *beacon.BeaconClientAdapter,
 		denebBlock,
 		calcBeaconBlockDomain,
 		validatorKey,
-		b.includeBlobRecord,
-		b.rejectBlobRecord,
 	)
 
 	if executed && err == nil {
