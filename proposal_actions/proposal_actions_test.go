@@ -2,6 +2,7 @@ package proposal_actions_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/marioevz/blobber/proposal_actions"
 )
@@ -104,5 +105,22 @@ func TestProposalActionsJsonParsing(t *testing.T) {
 		if actCast.BroadcastBlobsFirst != true {
 			t.Fatalf("UnmarshallProposalAction() broadcast_blobs_first = %t", actCast.BroadcastBlobsFirst)
 		}
+	}
+}
+
+func TestBlobGossipDelaySlotMiss(t *testing.T) {
+	spec := map[string]interface{}{
+		"SECONDS_PER_SLOT":      12 * time.Second,
+		"SLOT_DURATION_MS":      uint64(12000),
+		"SLOTS_PER_EPOCH":       uint64(32),
+		"HEZE_FORK_EPOCH":       uint64(5),
+		"SLOT_DURATION_MS_HEZE": uint64(9000),
+	}
+	action := proposal_actions.BlobGossipDelay{DelayMilliseconds: 5000}
+	if action.SlotMiss(spec, 159) {
+		t.Fatalf("SlotMiss() pre-fork = true, want false")
+	}
+	if !action.SlotMiss(spec, 160) {
+		t.Fatalf("SlotMiss() post-fork = false, want true")
 	}
 }

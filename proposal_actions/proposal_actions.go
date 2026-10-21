@@ -10,6 +10,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/lithammer/dedent"
+	"github.com/marioevz/blobber/common"
 	"github.com/marioevz/blobber/keys"
 	"github.com/marioevz/blobber/kzg"
 	"github.com/marioevz/blobber/p2p"
@@ -29,7 +30,7 @@ var (
 type ProposalActionBase interface {
 	Name() string
 	Description() string
-	SlotMiss(spec map[string]interface{}) bool
+	SlotMiss(spec map[string]interface{}, slot phase0.Slot) bool
 	Fields() map[string]interface{}
 	GetTestPeerCount() int
 	CanExecute(
@@ -181,7 +182,7 @@ func (s Default) Description() string {
 	return desc
 }
 
-func (s Default) SlotMiss(_ map[string]interface{}) bool {
+func (s Default) SlotMiss(_ map[string]interface{}, _ phase0.Slot) bool {
 	return false
 }
 
@@ -251,10 +252,6 @@ func (s Default) Execute(
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block and blob sidecars")
 	}
 
-	if !s.SlotMiss(spec) {
-		// Previously tracked blobs for inclusion - removed as unused
-	}
-
 	duration := time.Since(start)
 	logrus.WithFields(logrus.Fields{
 		"action":      s.Name(),
@@ -285,14 +282,9 @@ func (s BlobGossipDelay) Description() string {
 		- Broadcast the blob sidecars`), s.DelayMilliseconds)
 }
 
-func (s BlobGossipDelay) SlotMiss(spec map[string]interface{}) bool {
+func (s BlobGossipDelay) SlotMiss(spec map[string]interface{}, slot phase0.Slot) bool {
 	// Consider a slot miss only if the delay is more than half a slot
-	secondsPerSlot, ok := spec["SECONDS_PER_SLOT"].(uint64)
-	if !ok {
-		// Default to 12 seconds if not found
-		secondsPerSlot = 12
-	}
-	return s.DelayMilliseconds >= int(secondsPerSlot*1000)/2
+	return int64(s.DelayMilliseconds) >= common.GetSlotDuration(spec, slot).Milliseconds()/2
 }
 
 func (s BlobGossipDelay) Fields() map[string]interface{} {
@@ -368,10 +360,6 @@ func (s BlobGossipDelay) Execute(
 			"delay_ms":   s.DelayMilliseconds,
 		}).Error("Failed to broadcast via direct P2P messaging for blob gossip delay action")
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block and blob sidecars")
-	}
-
-	if !s.SlotMiss(spec) {
-		// Previously tracked blobs for inclusion - removed as unused
 	}
 
 	duration := time.Since(start)
@@ -885,7 +873,7 @@ func (s InvalidEquivocatingBlock) Execute(
 		return false, errors.Wrap(err, "failed to broadcast signed beacon block")
 	}
 
-	if !s.SlotMiss(spec) {
+	if !s.SlotMiss(spec, beaconBlockContents.Block.Slot) {
 		// Previously tracked blobs for inclusion - removed as unused
 		logrus.WithFields(logrus.Fields{
 			"action":     s.Name(),

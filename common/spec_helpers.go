@@ -3,6 +3,8 @@ package common
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
+	"time"
 
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 )
@@ -60,6 +62,26 @@ func GetForkVersion(spec map[string]interface{}, slot phase0.Slot) (phase0.Versi
 	}
 
 	return GetForkVersionValue(spec, "GENESIS_FORK_VERSION")
+}
+
+// GetSlotDuration returns the slot duration in effect at the given slot
+func GetSlotDuration(spec map[string]interface{}, slot phase0.Slot) time.Duration {
+	duration := GetSpecValue[time.Duration](spec, "SECONDS_PER_SLOT", 12*time.Second)
+	if slotDurationMs := GetSpecValue[uint64](spec, "SLOT_DURATION_MS", 0); slotDurationMs != 0 {
+		duration = time.Duration(slotDurationMs) * time.Millisecond
+	}
+
+	hezeSlotDurationMs := GetSpecValue[uint64](spec, "SLOT_DURATION_MS_HEZE", 0)
+	hezeEpoch := GetSpecValue[phase0.Epoch](spec, "HEZE_FORK_EPOCH", phase0.Epoch(math.MaxUint64))
+	slotsPerEpoch := GetSpecValue[uint64](spec, "SLOTS_PER_EPOCH", 32)
+	if hezeSlotDurationMs == 0 || hezeEpoch == math.MaxUint64 || slotsPerEpoch == 0 {
+		return duration
+	}
+	if phase0.Epoch(uint64(slot)/slotsPerEpoch) >= hezeEpoch {
+		return time.Duration(hezeSlotDurationMs) * time.Millisecond
+	}
+
+	return duration
 }
 
 // GetForkVersionValue extracts a fork version from the spec
